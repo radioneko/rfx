@@ -100,7 +100,7 @@ recvq::recvq(int dir) : rd(NULL), rd_pos(0), dir(dir)
 bool
 recvq::recv(int fd)
 {
-	uint8_t			buf[192];
+	uint8_t			buf[8192];
 	struct iovec	rv[2];
 	int bytes;
 
@@ -131,6 +131,11 @@ recvq::recv(int fd)
 						return false;
 					}
 					rd_pos = sizeof(rd_buf);
+					if (rd_pos == rd->len) {
+						pqh_push(&pq, rd);
+						rd = NULL;
+						rd_pos = 0;
+					}
 				}
 				bytes -= rv[0].iov_len;
 				/* extract full packets */

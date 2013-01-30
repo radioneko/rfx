@@ -12,11 +12,18 @@
 #include <sys/types.h>
 #include <pwd.h>
 #include <sys/ioctl.h>
+#include <netinet/tcp.h>
 
 int
 set_nonblock(int sock,int value)
 {
 	return ioctl(sock, FIONBIO, &value);
+}
+
+int
+set_nodelay(int sock, int value)
+{
+	return setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (char*)&value, sizeof(value));
 }
 
 /** Осуществляет попытку соединения в течение указанного интервала времени */

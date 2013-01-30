@@ -28,6 +28,7 @@ extern "C" {
 #endif /* C++ */
 
 int set_nonblock(int sock,int value);
+int set_nodelay(int sock,int value);
 int nonblock_connect(int sock,struct sockaddr *sa,socklen_t sl,int timeout);
 int init_addr(addr_t *addr,const char *str);
 char *addr2a(const addr_t *a, char *buf, unsigned *size);

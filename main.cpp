@@ -182,9 +182,11 @@ int main(int argc, char **argv)
 
 	sock = make_listen_socket(&bind_sa);
 
+	ignore_signal(SIGPIPE);
+
 	ev_io_init(&io, cli_connect_cb, sock, EV_READ);
 	ev_io_start(loop, &io);
-	ev_run(loop, 0);
+	ev_loop(loop, 0);
 
 	return 0;
 }
@@ -291,6 +293,8 @@ proxy_run(EV_P_ int cli, int srv)
 {
 	set_nonblock(cli, 1);
 	set_nonblock(srv, 1);
+	set_nodelay(cli, 1);
+	set_nodelay(srv, 1);
 	rf_session *s = new rf_session(cli, srv);
 	s->run(EV_A);
 }
