@@ -100,7 +100,6 @@ rfx_chat::process(rfx_event *ev, pqhead_t *pre, pqhead_t *post, evqhead_t *evq)
 			memcpy(p, e->msg.c_str(), l);
 			p[l] = 0;
 			pqh_push(post, pkt);
-			dump_pkt(pkt);
 			return RFX_BREAK;
 		}
 	}
