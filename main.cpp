@@ -236,7 +236,7 @@ int main(int argc, char **argv)
 	struct ev_timer pt;
 	struct ev_loop *loop = ev_default_loop(0);
 
-	load_plugins("dl/rfx_chat.so", "dl/rfx_loot.so", NULL);
+	load_plugins("dl/rfx_chat.so", "dl/rfx_loot.so", "dl/rfx_debug.so", NULL);
 	if (init_addr(&bind_sa, bind_addr) != 0)
 		perror_fatal("Can't parse bind addr: `%s'", bind_addr);
 	if (init_addr(&rf_sa, rf_addr) != 0)
