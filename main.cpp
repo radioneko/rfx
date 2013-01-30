@@ -419,7 +419,8 @@ rfx_module::reload()
 		/* save state and destory previous filters */
 		TAILQ_FOREACH(i, &ih, ilink) {
 			if (i->flt) {
-				i->st = i->flt->save_state();
+				i->st = new rfx_state(0);
+				i->flt->save_state(i->st);
 				delete i->flt;
 				i->flt = NULL;
 			}

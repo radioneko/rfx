@@ -11,7 +11,7 @@ public:
 	int process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_t *evq);
 	int process(rfx_event *ev, pqhead_t *pre, pqhead_t *post, evqhead_t *evq);
 
-	rfx_state* save_state() { return NULL; }
+	void save_state(rfx_state *) { }
 	bool load_state(rfx_state *) { return true; }
 };
 
