@@ -11,11 +11,11 @@ VPATH = lib
 all: proxy libutil.a $(DLDIR)/rfx_chat.so $(DLDIR)/rfx_loot.so
 
 proxy: $(OBJDIR)/main.o $(OBJDIR)/proxy.o $(OBJDIR)/evq.o \
-       $(OBJDIR)/pktq.o $(OBJDIR)/api_version.o libutil.a
+       $(OBJDIR)/pktq.o api_version.c libutil.a
 	$(CXX) -o $@ $^ -lev -ldl
 
-$(DLDIR)/%.so: $(OBJDIR)/pic_%.o $(OBJDIR)/pic_api_version.o librfxmod.a
-	$(CXX) -shared -o $@ $^
+$(DLDIR)/%.so: $(OBJDIR)/pic_%.o api_version.c librfxmod.a
+	$(CXX) -shared -fPIC -DPIC -o $@ $^
 
 ifeq ($(filter dep clean,$(MAKECMDGOALS)),)
 .dep: dep
@@ -44,7 +44,7 @@ librfxmod.a: $(OBJDIR)/pic_pktq.o $(OBJDIR)/pic_evq.o
 .PHONY: dep
 
 api_version.c: rfx_api.h pktq.h evq.h
-	cat $^ | openssl sha1 | sed -e 's/[^ =]*[ =]*//' -e 's/^/const char rfx_api_ver[] = "/' -e 's/$$/";/' > $@
+	cat $^ | openssl sha1 | sed -e 's/.*= *//' -e 's/^/extern "C" const char rfx_api_ver[] = "/' -e 's/$$/";/' > $@
 
 dep: api_version.c
 	@$(CC) -MM $(CFLAGS) $(C_SRC) | sed -re 's/^([^:]+:)/$(OBJDIR)\/\1/' > .dep
