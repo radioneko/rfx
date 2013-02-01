@@ -61,7 +61,7 @@ struct proxy_pipe {
 	int			handle_read_event(EV_P);
 	int			handle_write_event(EV_P);
 	void 		run(EV_P)						{ ev_io_start(EV_A_ &in); }
-	void 		stop(EV_P)						{ev_io_stop(EV_A_ &in); ev_io_stop(EV_A_ &out); }
+	void 		stop(EV_P)						{ ev_io_stop(EV_A_ &in); ev_io_stop(EV_A_ &out); }
 	rf_packet_t *pop_in()						{ return pqh_pop(&rcvq.pq); }
 	void		push_out(rf_packet_t *p)		{ pqh_push(&sndq.pq, p); }
 	void		inject(pqhead_t *pqh)			{ sndq.pull(pqh); }

@@ -344,7 +344,6 @@ rfx_filter_chain::process(evqhead_t *evq, pqhead_t *pre, pqhead_t *post)
 	rfx_event *ev;
 	while ((ev = evq->pop_front())) {
 		TAILQ_FOREACH(i, &ch, clink) {
-			printf("INVOKE\n");
 			if (i->flt && i->flt->process(ev, pre, post, evq) == RFX_BREAK)
 				break;
 		}
@@ -499,12 +498,127 @@ build_chain(rfx_filter_chain &c)
 }
 /* }}} */
 
+/* Delayed packet queue implementation {{{ */
+class delayed_queue;
+
+struct delayed_pkt {
+	ev_timer					wait;
+	rf_packet_t					*pkt;
+	TAILQ_ENTRY(delayed_pkt)	link;
+	delayed_queue				&dq;
+
+	delayed_pkt(delayed_queue &qh, rf_packet_t *pkt, void (*cb)(EV_P_ ev_timer *dp, int revents)) : pkt(pkt), dq(qh) { ev_timer_init(&wait, cb, pkt->delay / 1000.0, 0.0); wait.data = this; }
+	~delayed_pkt() { if (pkt) pkt_unref(pkt); }
+
+	void start(EV_P) { ev_timer_start(EV_A_ &wait); }
+	void stop(EV_P) { ev_timer_stop(EV_A_ &wait); }
+};
+
+class delayed_queue {
+	TAILQ_HEAD(, delayed_pkt)	qh;
+	static void timeout_cb(EV_P_ ev_timer *tmr, int revents);
+	bool has_new;
+public:
+	delayed_queue() : has_new(false) { TAILQ_INIT(&qh); }
+	virtual ~delayed_queue();
+
+	void add(EV_P_ rf_packet_t *pkt);
+	void pull(pqhead_t *src);
+	void start(EV_P);
+	void stop(EV_P);
+	virtual void emit(EV_P_ rf_packet_t *pkt) = 0;
+};
+
+/* destroy all pending packets */
+delayed_queue::~delayed_queue()
+{
+	delayed_pkt *dp, *tmp;
+	TAILQ_FOREACH_SAFE(dp, &qh, link, tmp) {
+		TAILQ_REMOVE(&qh, dp, link);
+		delete dp;
+	}
+}
+
+/* Add all packets to delayed queue */
+void
+delayed_queue::pull(pqhead_t *src)
+{
+	rf_packet_t *pkt;
+//	printf("delayed_queue::pull BEGIN\n");
+	while ((pkt = pqh_pop(src))) {
+		delayed_pkt *dp = new delayed_pkt(*this, pkt, timeout_cb);
+		has_new = true;
+		TAILQ_INSERT_TAIL(&qh, dp, link);
+	}
+//	printf("delayed_queue::pull DONE\n");
+}
+
+/* start all watchers */
+void
+delayed_queue::start(EV_P)
+{
+	if (has_new) {
+		delayed_pkt *dp;
+		printf("delayes_queue::start BEGIN\n");
+		TAILQ_FOREACH(dp, &qh, link) {
+			if (!ev_is_active(&dp->wait))
+				dp->start(EV_A);
+		}
+		printf("delayes_queue::start DONE\n");
+		has_new = false;
+	}
+}
+
+/* stop all pending packets */
+void
+delayed_queue::stop(EV_P)
+{
+	delayed_pkt *dp;
+	TAILQ_FOREACH(dp, &qh, link) {
+		dp->stop(EV_A);
+	}
+}
+
+/* invoke emit handler */
+void
+delayed_queue::timeout_cb(EV_P_ ev_timer *tmr, int revents)
+{
+	printf("delayed_queue::timeout_cb BEGIN\n");
+	delayed_pkt *dp = (delayed_pkt*)tmr->data;
+	delayed_queue *self = &dp->dq;
+	ev_timer_stop(EV_A_ tmr);
+	TAILQ_REMOVE(&self->qh, dp, link);
+	self->emit(EV_A_ dp->pkt);
+	printf("delayed_queue::timeout_cb END\n");
+	delete dp;
+}
+
+void
+delayed_queue::add(EV_P_ rf_packet_t *pkt)
+{
+	delayed_pkt *dp = new delayed_pkt(*this, pkt, timeout_cb);
+	TAILQ_INSERT_TAIL(&qh, dp, link);
+	dp->start(EV_A);
+}
+/* }}} */
 
 /* rf_session {{{ */
+class rf_session;
+
+class rf_delayed_queue : public delayed_queue {
+	rf_session &session;
+public:
+	rf_delayed_queue(rf_session &session) : delayed_queue(), session(session) {}
+
+	void emit(EV_P_ rf_packet_t *pkt);
+};
+
 class rf_session {
-	proxy_pipe		c2s;
-	proxy_pipe		s2c;
-	rfx_filter_chain flt;
+	friend class rf_delayed_queue;
+	proxy_pipe			c2s;
+	proxy_pipe			s2c;
+	rfx_filter_chain	flt;
+	rf_delayed_queue	dq;
 	static void cli_io_cb(EV_P_ ev_io *io, int revents);
 	static void srv_io_cb(EV_P_ ev_io *io, int revents);
 public:
@@ -515,9 +629,18 @@ public:
 	bool done(); // { return ((c2s.state & PIPE_EOF) && (s2c.state & PIPE_EOF)) || (c2s.state & PIPE_BROKEN) || (s2c.state & PIPE_BROKEN); }
 
 	void run(EV_P) { c2s.run(EV_A); s2c.run(EV_A); }
-	void stop(EV_P) { c2s.stop(EV_A); s2c.stop(EV_A); }
+	void stop(EV_P) { dq.stop(EV_A); c2s.stop(EV_A); s2c.stop(EV_A); }
 	void filter(int dir);
 };
+
+void
+rf_delayed_queue::emit(EV_P_ rf_packet_t *pkt)
+{
+	proxy_pipe &p =  pkt->dir == SRV_TO_CLI ? session.s2c : session.c2s;
+	pkt_ref(pkt);
+	p.push_out(pkt);
+	p.handle_write_event(EV_A);
+}
 
 bool rf_session::done()
 {
@@ -532,6 +655,7 @@ void rf_session::cli_io_cb(EV_P_ ev_io *io, int revents)
 	if (revents & EV_READ) {
 		r->c2s.handle_read_event(EV_A);
 		r->filter(CLI_TO_SRV);
+		r->dq.start(EV_A);
 		r->c2s.handle_write_event(EV_A);
 		r->s2c.handle_write_event(EV_A);
 	}
@@ -552,6 +676,7 @@ void rf_session::srv_io_cb(EV_P_ ev_io *io, int revents)
 	if (revents & EV_READ) {
 		r->s2c.handle_read_event(EV_A);
 		r->filter(SRV_TO_CLI);
+		r->dq.start(EV_A);
 		r->s2c.handle_write_event(EV_A);
 		r->c2s.handle_write_event(EV_A);
 	}
@@ -586,6 +711,7 @@ rf_session::filter(int dir)
 		/* 3. enqueue prepended packets */
 		s2c.inject(&pre);
 		c2s.inject(&pre);
+		dq.pull(&pre);
 
 		/* 4. dump packet if debug info requested */
 		if (pkt->show)
@@ -601,6 +727,7 @@ rf_session::filter(int dir)
 		/* 6. enqueue appended packets */
 		s2c.inject(&post);
 		c2s.inject(&post);
+		dq.pull(&post);
 		/* actually pre & post queues should be empty */
 		pqh_clear(&pre);
 		pqh_clear(&post);
@@ -609,7 +736,8 @@ rf_session::filter(int dir)
 
 rf_session::rf_session(int cli, int srv)
 		: c2s(cli, srv, CLI_TO_SRV, cli_io_cb, this),
-		  s2c(srv, cli, SRV_TO_CLI, srv_io_cb, this)
+		  s2c(srv, cli, SRV_TO_CLI, srv_io_cb, this),
+		  dq(*this)
 {
 	build_chain(flt);
 }

@@ -17,6 +17,7 @@ typedef struct rf_packet {
 	uint8_t					drop:1;			/* packet should be dropped */
 	uint8_t					show:1;			/* packet hex dump will be displayed */
 	unsigned				refc;
+	unsigned				delay;			/* delay before this packet sending (in milliseconds) */
 	const char				*desc;			/* description (for debug purposes) */
 	TAILQ_ENTRY(rf_packet)	link;
 	uint8_t					data[0];		/* this header also includes length and data fields */
@@ -40,7 +41,7 @@ int				pqh_empty(const pqhead_t *pqh);
 rf_packet_t		*pqh_pop(pqhead_t *pqh);
 void			pqh_push(pqhead_t *pqh, rf_packet_t *pkt);
 void			pqh_discard(pqhead_t *pqh);
-unsigned		pqh_pull(pqhead_t *src, pqhead_t *dst, int dir, struct iovec *outv, unsigned outv_sz);
+unsigned		pqh_pull(pqhead_t *src, pqhead_t *dst, int dir, struct iovec *outv, unsigned outv_sz, unsigned min_delay);
 
 //int				pq_do_read(pkt_queue_t *pq, int fd, int dir);
 //int				pq_do_write(pkt_queue_t *pq, int fd, int dir);

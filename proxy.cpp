@@ -80,7 +80,7 @@ sendq::pull(pqhead_t *src)
 			memmove(svbuf, sv, svc * sizeof(*sv));
 			sv = svbuf;
 		}
-		svc += pqh_pull(src, &pq, dir, svbuf + svc, WRIVCNT - svc);
+		svc += pqh_pull(src, &pq, dir, svbuf + svc, WRIVCNT - svc, 0);
 	}
 	return svc;
 }

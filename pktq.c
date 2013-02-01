@@ -5,7 +5,7 @@
 rf_packet_t*
 pkt_new(unsigned len, unsigned type, int dir)
 {
-	rf_packet_t *pkt = malloc(sizeof(*pkt) + len);
+	rf_packet_t *pkt = calloc(1, sizeof(*pkt) + len);
 
 //	printf("pkt_new: type = 0x%04x, len = %u\n", type, len);
 	pkt->len = len;
@@ -15,6 +15,7 @@ pkt_new(unsigned len, unsigned type, int dir)
 	pkt->show = 0;
 	pkt->refc = 1;
 	pkt->desc = NULL;
+	pkt->delay = 0;
 
 	pkt->data[0] = len & 0xff;
 	pkt->data[1] = (len >> 8) & 0xff;
@@ -79,13 +80,15 @@ pqh_push(pqhead_t *pqh, rf_packet_t *pkt)
 
 /* Pull count packets from queue to dst list and iovec */
 unsigned
-pqh_pull(pqhead_t *src, pqhead_t *dst, int dir, struct iovec *outv, unsigned outv_sz)
+pqh_pull(pqhead_t *src, pqhead_t *dst, int dir, struct iovec *outv, unsigned outv_sz, unsigned min_delay)
 {
 	unsigned i = 0;
 	rf_packet_t *p, *tmp;
 	TAILQ_FOREACH_SAFE(p, src, link, tmp) {
 		if (i >= outv_sz)
 			break;
+		if (p->delay > min_delay)
+			continue;
 		if (p->dir == dir) {
 			TAILQ_REMOVE(src, p, link);
 			if (!p->drop) {
