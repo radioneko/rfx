@@ -176,7 +176,7 @@ rfx_loot::process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_t *ev
 			} else if (pkt->data[4] == 9) {
 				/* rate limit, resend */
 				rf_packet_t *rq = pick_rq();
-				rq->delay = 200; /* 100 ms delay */
+				rq->delay = 100; /* 100 ms delay */
 				pqh_push(post, rq);
 				pkt->drop = 1;
 			} else {

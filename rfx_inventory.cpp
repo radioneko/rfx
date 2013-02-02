@@ -1,9 +1,21 @@
 #include "rfx_api.h"
 #include "rfx_modules.h"
 #include "cconsole.h"
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <map>
+
+static unsigned get_cost(unsigned code)
+{
+	switch (code) {
+	case 0x1614:		return 21576;
+	case 0x1714:		return 24185; /* TODO */
+	default:			return 0;
+	}
+}
+
+#define M_STEP 1000000
 
 #define	LOOT_DROP_NEW		0x1403
 #define	LOOT_DROP_HORIZON	0x0f04
@@ -42,6 +54,7 @@ public:
 	unsigned clear(unsigned code);
 
 	int alloc_iid(unsigned code);
+	uint64_t cost() const;
 
 	void dump(int filter = -1);
 	void reset();
@@ -51,6 +64,21 @@ public:
 };
 
 /* backpack implementation {{{ */
+uint64_t
+backpack::cost() const
+{
+	uint64_t result = 0;
+	/* walk "new_items" */
+	for (iid_map_t::const_iterator i = new_items.begin(); i != new_items.end(); ++i)
+		result += get_cost(i->second.code) * i->second.count;
+	/* walk backpack */
+	for (unsigned idx = 0; idx < sizeof(items) / sizeof(*items); idx++) {
+		const backpack_item *ii = items + idx;
+		if (ii->iid != EMPTY_CELL)
+			result += get_cost(ii->code) * ii->count;
+	}
+	return result;
+}
 
 /* remove items with specified ids from inventory and from new_items */
 unsigned
@@ -321,9 +349,11 @@ class rfx_inventory : public rfx_filter {
 	pick_queue		pq;
 	bool			autopick;
 	bool			schedule_pick(evqhead_t *evq);
+	uint64_t		c_margin;
+	time_t			c_tstamp;
 	std::string		handle_iq(const std::string &msg, evqhead_t *evq);
 public:
-	rfx_inventory() : autopick(false) {}
+	rfx_inventory() : autopick(false), c_margin(0), c_tstamp(time(NULL)) {}
 
 	int process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_t *evq);
 	int process(rfx_event *ev, pqhead_t *pre, pqhead_t *post, evqhead_t *evq);
@@ -346,6 +376,8 @@ rfx_inventory::process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_
 				backpack_item ii(GET_INT24(p + 3), IID_UNKNOWN, p[14], GET_INT16(p + 6));
 				inv.put(ii);
 			}
+			c_margin = inv.cost();
+			c_tstamp = time(NULL);
 		}
 		break;
 	case 0x0407:
@@ -454,10 +486,16 @@ rfx_inventory::handle_iq(const std::string &msg, evqhead_t *evq)
 	} else if (msg == "inv") {
 		pq.set_mode(pick_queue::STACK);
 		return "inverted loot pickup";
+	} else if (msg == "cost") {
+		char reply[64];
+		sprintf(reply, "total cost: %.2fkk", inv.cost() / 1000000.0);
+		return reply;
 	} else if (msg.size() > 3 && msg.compare(0, 1, "-") == 0 && isxdigit(msg[1])) {
 		char reply[64];
 		int code = h2i(msg.c_str() + 1);
 		sprintf(reply, "%u items with code 0x%x removed", inv.clear(code), code);
+		c_tstamp = time(NULL);
+		c_margin = inv.cost();
 		return reply;
 	} else {
 		int filter = msg.empty() ? -1 : h2i(msg.c_str());
@@ -498,8 +536,24 @@ rfx_inventory::process(rfx_event *ev, pqhead_t *pre, pqhead_t *post, evqhead_t *
 //		printf("*remove loot 0x%x\n", e->gid);
 		pq.remove(e->gid);
 	} else if (ev->what == RFXEV_LOOT_PICK) {
+		uint64_t cost = inv.cost();
 		rfx_loot_pick_event *e = (rfx_loot_pick_event*)ev;
 		pq.remove(e->gid);
+		if (cost >= c_margin + M_STEP) {
+			char ntfy[128];
+			time_t now = time(NULL);
+			double avg;
+			if (now != c_tstamp)
+				avg = (double)(cost - c_margin) / (now - c_tstamp) / 1000000.0 * 60.0;
+			else
+				avg = 9999.99;
+			snprintf(ntfy, sizeof(ntfy), "cost %.2fkk in %u sec, %.3fkk/min",
+					cost / 1000000.0, (unsigned)(now - c_tstamp), avg);
+			evq->push_back(new rfx_chat_event(RFXEV_SEND_REPLY, "iq", ntfy, NULL));
+
+			c_tstamp = now;
+			c_margin = cost;
+		}
 		schedule_pick(evq);
 	}
 	return RFX_DECLINE;
