@@ -48,6 +48,13 @@ find_int16(rf_packet_t *pkt, unsigned what)
 int
 rfx_debug::process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_t *evq)
 {
+	if (pkt->type == grab_id) {
+		pkt->desc = "[ grabbed packet ]";
+		pkt->show = dbg_show;
+		grab_id = -1;
+		ungrab_pkt();
+		grab = pkt_ref(pkt);
+	}
 #if 1
 	switch (pkt->type) {
 	case 0x1304: // cli -> srv: move
@@ -97,13 +104,6 @@ rfx_debug::process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_t *e
 	};
 #endif
 
-	if (pkt->type == grab_id) {
-		pkt->desc = "[ grabbed packet ]";
-		pkt->show = dbg_show;
-		grab_id = -1;
-		ungrab_pkt();
-		grab = pkt_ref(pkt);
-	}
 	/* magic timeout */
 	if (pkt->type == 0x0211 && pkt->data[4] != 0x00 && grab) {
 		pkt->drop = 1;
