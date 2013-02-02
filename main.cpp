@@ -159,6 +159,8 @@ cli_connect_cb(EV_P_ ev_io *io, int revents)
 			close(srv);
 			continue;
 		}
+		set_nodelay(fd, 1);
+		set_nodelay(srv, 1);
 		if (connect(srv, &rf_sa.name, rf_sa.namelen) == -1) {
 			if (errno == EINPROGRESS) {
 				bootstrap *b = new bootstrap(fd, srv);
