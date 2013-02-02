@@ -119,7 +119,7 @@ public:
 };
 
 static bool
-dumb_test_pred(int code)
+dumb_test_good(int code)
 {
 	switch (code) {
 	/* HP/FP 25 */
@@ -172,14 +172,31 @@ dumb_test_pred(int code)
 	case 0x18D06: //	iwswb50 two-handed sword
 	case 0x4AD06: //	iwspb50 spear
 		return true;
+	/* misc stuff */
+	case 0x174403: //	53 in laucher boots
+	case 0x174303: // ?? test_items says this is actual boots identifier
+		return true;
 	}
 	return false;
 }
 
 static bool
+dumb_test_bad(int code)
+{
+	switch (code) {
+	case 0x011e: // exp restoration 30-70%
+	// 55 int topor 0x213906
+	case 0x5112: // blue pudra
+	case 0x16914: // rare ore
+		return false;
+	}
+	return true;
+}
+
+static bool
 dumb_test(int code)
 {
-	if (dumb_test_pred(code)) {
+	if (dumb_test_good(code)) {
 		printf(lcc_PURPLE "* Item 0x%x on the ground!" lcc_NORMAL "\n", code);
 		return true;
 	} else {
