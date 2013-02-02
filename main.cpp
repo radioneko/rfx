@@ -204,7 +204,9 @@ plugins_check_cb(EV_P_ ev_timer *t, int revents)
 {
 	ev_timer_stop(EV_A_ t);
 	reload_plugins();
+#if EV_VERSION_MAJOR >= 4
 	ev_now_update(EV_A);
+#endif
 	t->repeat = 1;
 	ev_timer_again(EV_A_ t);
 }
