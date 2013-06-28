@@ -303,7 +303,7 @@ public:
 
 	void			detach_instance(rfx_instance *rfi) { TAILQ_REMOVE(&ch, rfi, clink); }
 	void			process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_t *evq);
-	void			process(rfx_event *ev, pqhead_t *pre, pqhead_t *post, evqhead_t *evq);
+	void			process(evqhead_t *evq, pqhead_t *pre, pqhead_t *post);
 	void			add_filter(rfx_instance *rfi);
 };
 
@@ -338,12 +338,17 @@ rfx_filter_chain::process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhe
 }
 
 void
-rfx_filter_chain::process(rfx_event *ev, pqhead_t *pre, pqhead_t *post, evqhead_t *evq)
+rfx_filter_chain::process(evqhead_t *evq, pqhead_t *pre, pqhead_t *post)
 {
 	rfx_instance *i;
-	TAILQ_FOREACH(i, &ch, clink) {
-		if (i->flt && i->flt->process(ev, pre, post, evq) == RFX_BREAK)
-			break;
+	rfx_event *ev;
+	while ((ev = evq->pop_front())) {
+		TAILQ_FOREACH(i, &ch, clink) {
+			printf("INVOKE\n");
+			if (i->flt && i->flt->process(ev, pre, post, evq) == RFX_BREAK)
+				break;
+		}
+		delete ev;
 	}
 }
 
@@ -575,7 +580,7 @@ rf_session::filter(int dir)
 		flt.process(pkt, &pre, &post, &ev);
 
 		/* 2. proces all fired events */
-		flt.process(pkt, &pre, &post, &ev);
+		flt.process(&ev, &pre, &post);
 
 		/* 3. enqueue prepended packets */
 		s2c.inject(&pre);
