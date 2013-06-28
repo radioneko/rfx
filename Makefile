@@ -44,8 +44,8 @@ play:
 	nc 127.0.0.1 1234 -q1 < 1/$(STREAM)
 
 r: proxy listen
-	strace -e epoll_wait,epoll_ctl,readv,writev,connect,accept,close ./$<
-#	./$<
+#	strace -e epoll_wait,epoll_ctl,readv,writev,connect,accept,close ./$<
+	./$<
 
 v: proxy listen
 	valgrind --tool=memcheck --leak-check=full --show-reachable=yes -v ./$<

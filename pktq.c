@@ -11,6 +11,8 @@ pkt_new(unsigned len, unsigned type, int dir)
 	pkt->len = len;
 	pkt->type = type;
 	pkt->dir = dir;
+	pkt->drop = 0;
+	pkt->show = 0;
 	pkt->refc = 1;
 
 	pkt->data[0] = len & 0xff;
@@ -84,11 +86,15 @@ pqh_pull(pqhead_t *src, pqhead_t *dst, int dir, struct iovec *outv, unsigned out
 		if (i >= outv_sz)
 			break;
 		if (p->dir == dir) {
-			outv[i].iov_base = p->data;
-			outv[i].iov_len = p->len;
-			i++;
 			TAILQ_REMOVE(src, p, link);
-			TAILQ_INSERT_TAIL(dst, p, link);
+			if (!p->drop) {
+				outv[i].iov_base = p->data;
+				outv[i].iov_len = p->len;
+				i++;
+				TAILQ_INSERT_TAIL(dst, p, link);
+			} else {
+				pkt_unref(p);
+			}
 		}
 	}
 	return i;

@@ -17,8 +17,17 @@ static const char
 
 void dump_pkt(rf_packet_t *pkt)
 {
-	printf(lcc_YELLOW "***" lcc_NORMAL " packet " lcc_GREEN "0x%04x" lcc_NORMAL ", len = %u " lcc_YELLOW "***" lcc_NORMAL "\n",
-			pkt->type, pkt->len);
+	const char *state = "", *dir;
+
+	if (pkt->drop)
+		state = lcc_RED " [DROPPED]";
+	if (pkt->dir == SRV_TO_CLI)
+		dir = lcc_PURPLE "==>> s2c";
+	else
+		dir = lcc_CYAN "<<== c2s";
+
+	printf(lcc_YELLOW "\n%s%s" lcc_NORMAL " packet " lcc_GREEN "0x%04x" lcc_NORMAL ", len = %u " lcc_NORMAL "\n",
+			dir, state, pkt->type, pkt->len);
 	hexdump(stdout, 0, pkt->data, pkt->len);
 }
 
@@ -456,7 +465,6 @@ proxy_pipe::handle_read_event(EV_P)
 		state |= PIPE_EOF;
 		ev_io_stop(EV_A_ &in);
 	}
-	printf("handle_read_event: state = %d\n", state);
 
 	return 0;
 }
@@ -478,7 +486,6 @@ proxy_pipe::handle_write_event(EV_P)
 	} else {
 		ev_io_start(EV_A_ &out);
 	}
-	printf("handle_write_event: state = %d\n", state);
 
 	return 0;
 }
@@ -559,12 +566,19 @@ rf_session::filter(int dir)
 
 		s2c.inject(&pre);
 		c2s.inject(&pre);
-//		dump_pkt(pkt);
-		p.push_out(pkt);
+		if (pkt->show)
+			dump_pkt(pkt);
+		if (!pkt->drop) {
+			p.push_out(pkt);
+		} else {
+			pkt_unref(pkt);
+		}
 		s2c.inject(&post);
 		c2s.inject(&post);
+		/* actually pre & post queues should be empty */
+		pqh_clear(&pre);
+		pqh_clear(&post);
 	}
-//	printf(lcc_CYAN "%d" lcc_NORMAL " packets transferred\n", count);
 }
 
 rf_session::rf_session(int cli, int srv)
