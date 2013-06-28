@@ -3,13 +3,13 @@ CFLAGS := -Wall -g -O0 -fno-inline -Iinclude
 CXXFLAGS := $(CFLAGS)
 
 C_SRC := lib/daemonize.c lib/ini.c lib/mconf.c lib/misc.c lib/sock.c pktq.c
-CXX_SRC := main.cpp
+CXX_SRC := main.cpp proxy.cpp
 
 VPATH = lib
 
 all: proxy libutil.a
 
-proxy: $(OBJDIR)/main.o libutil.a
+proxy: $(OBJDIR)/main.o $(OBJDIR)/proxy.o libutil.a
 	$(CXX) -o $@ $^ -lev
 
 ifeq ($(filter dep clean,$(MAKECMDGOALS)),)
