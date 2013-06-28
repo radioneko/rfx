@@ -18,3 +18,5 @@ libutil.a
 .*swp
 .dep
 tags
+Makefile.local
+api_version.c
