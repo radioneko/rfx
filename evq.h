@@ -17,6 +17,7 @@ public:
 
 	rf_packet_t*				get_source() { return source; }
 	void						drop_source() { if (source) source->drop = 1; }
+	void						show_source() { if (source) source->show = 1; }
 };
 
 

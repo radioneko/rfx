@@ -17,6 +17,7 @@ typedef struct rf_packet {
 	uint8_t					drop:1;			/* packet should be dropped */
 	uint8_t					show:1;			/* packet hex dump will be displayed */
 	unsigned				refc;
+	const char				*desc;			/* description (for debug purposes) */
 	TAILQ_ENTRY(rf_packet)	link;
 	uint8_t					data[0];		/* this header also includes length and data fields */
 } rf_packet_t;

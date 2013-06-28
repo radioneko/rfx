@@ -14,6 +14,7 @@ pkt_new(unsigned len, unsigned type, int dir)
 	pkt->drop = 0;
 	pkt->show = 0;
 	pkt->refc = 1;
+	pkt->desc = NULL;
 
 	pkt->data[0] = len & 0xff;
 	pkt->data[1] = (len >> 8) & 0xff;

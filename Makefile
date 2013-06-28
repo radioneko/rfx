@@ -4,17 +4,17 @@ CFLAGS := -Wall -g -O0 -fno-inline -Iinclude
 CXXFLAGS := $(CFLAGS)
 
 C_SRC := lib/daemonize.c lib/ini.c lib/mconf.c lib/misc.c lib/sock.c pktq.c
-CXX_SRC := main.cpp proxy.cpp evq.cpp rfx_chat.cpp
+CXX_SRC := main.cpp proxy.cpp evq.cpp rfx_chat.cpp rfx_loot.cpp
 
 VPATH = lib
 
-all: proxy libutil.a $(DLDIR)/rfx_chat.so
+all: proxy libutil.a $(DLDIR)/rfx_chat.so $(DLDIR)/rfx_loot.so
 
 proxy: $(OBJDIR)/main.o $(OBJDIR)/proxy.o $(OBJDIR)/evq.o \
        $(OBJDIR)/pktq.o $(OBJDIR)/api_version.o libutil.a
 	$(CXX) -o $@ $^ -lev -ldl
 
-$(DLDIR)/%.so: $(OBJDIR)/pic_%.o $(OBJDIR)/pic_api_version.o
+$(DLDIR)/%.so: $(OBJDIR)/pic_%.o $(OBJDIR)/pic_api_version.o librfxmod.a
 	$(CXX) -shared -o $@ $^
 
 ifeq ($(filter dep clean,$(MAKECMDGOALS)),)
@@ -38,6 +38,9 @@ libutil.a: $(OBJDIR)/daemonize.o $(OBJDIR)/mconf.o $(OBJDIR)/misc.o \
 		$(OBJDIR)/sock.o
 	ar cru $@ $^
 
+librfxmod.a: $(OBJDIR)/pic_pktq.o $(OBJDIR)/pic_evq.o
+	ar cru $@ $^
+
 .PHONY: dep
 
 api_version.c: rfx_api.h pktq.h evq.h
@@ -48,7 +51,7 @@ dep: api_version.c
 	@$(CXX) -MM $(CFLAGS) $(CXX_SRC) | sed -re 's/^([^:]+:)/$(OBJDIR)\/\1/' >> .dep
 
 clean:
-	rm -f proxy libutil.a build/*.o
+	rm -f proxy libutil.a librfxmod.a build/*.o dl/*.so
 
 tag:
 	ctags -R .
