@@ -78,7 +78,7 @@ pqh_push(pqhead_t *pqh, rf_packet_t *pkt)
 unsigned
 pqh_pull(pqhead_t *src, pqhead_t *dst, int dir, struct iovec *outv, unsigned outv_sz)
 {
-	unsigned i;
+	unsigned i = 0;
 	rf_packet_t *p, *tmp;
 	TAILQ_FOREACH_SAFE(p, src, link, tmp) {
 		if (i >= outv_sz)

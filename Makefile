@@ -35,18 +35,23 @@ dep:
 
 
 STREAM := c2s
+STREAM := s2c
 
 listen:
 	-nc -l -p 27780 > /tmp/$(STREAM) &
 
 play:
-	nc 127.0.0.1 1234 < 1/$(STREAM)
+	nc 127.0.0.1 1234 -q1 < 1/$(STREAM)
 
 r: proxy listen
-	strace -e epoll_wait,epoll_ctl,readv,writev,connect,accept ./$<
+	strace -e epoll_wait,epoll_ctl,readv,writev,connect,accept,close ./$<
+#	./$<
 
 v: proxy listen
-	valgrind --tool=memcheck --leak-check=full -v ./$<
+	valgrind --tool=memcheck --leak-check=full --show-reachable=yes -v ./$<
 
 g: proxy listen
 	gdb --args ./$<
+
+t:
+	cmp /tmp/$(STREAM) 1/$(STREAM)

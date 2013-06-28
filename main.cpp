@@ -203,7 +203,6 @@ public:
 sendq::sendq(int dir) : svc(0), sv(svbuf), dir(dir)
 {
 	pqh_init(&pq);
-	printf("sendq::svc = %u\n", svc);
 }
 
 /* send any remaining data to file descriptor.
@@ -211,7 +210,7 @@ sendq::sendq(int dir) : svc(0), sv(svbuf), dir(dir)
 int
 sendq::send(int fd)
 {
-	printf("sendq::send: svc = %u\n", svc);
+	int count = 0;
 	if (!svc) {
 		rf_packet_t *pkt;
 		sv = svbuf;
@@ -221,7 +220,6 @@ sendq::send(int fd)
 			svc++;
 		}
 	}
-	printf("enqueued %u packets\n", svc);
 	while (svc) {
 		int bytes = writev(fd, sv, svc);
 		if (bytes > 0) {
@@ -230,6 +228,7 @@ sendq::send(int fd)
 				bytes -= sv->iov_len;
 				sv++;
 				svc--;
+				count++;
 			}
 			if (bytes) {
 				sv->iov_base = (char*)sv->iov_base + bytes;
@@ -259,6 +258,7 @@ sendq::send(int fd)
 			}
 		}
 	}
+//	printf(lcc_YELLOW "%d" lcc_NORMAL " packets sent\n", count);
 	return svc;
 }
 
@@ -266,10 +266,9 @@ sendq::send(int fd)
 int
 sendq::pull(pqhead_t *src)
 {
-	printf("sendq::pull: svc = %u\n", svc);
 	if (svc < WRIVCNT) {
 		if (sv != svbuf && svc) {
-			memmove(sv, svbuf, svc * sizeof(*sv));
+			memmove(svbuf, sv, svc * sizeof(*sv));
 			sv = svbuf;
 		}
 		svc += pqh_pull(src, &pq, dir, svbuf + svc, WRIVCNT - svc);
@@ -330,6 +329,7 @@ recvq::recv(int fd)
 					/* packet was fully read */
 					pqh_push(&pq, rd);
 					rd = NULL;
+					rd_pos = 0;
 				} else {
 					rd = pkt_new(GET_INT16(rd_buf), GET_INT16(rd_buf + 2), dir);
 					if (!rd) {
@@ -424,9 +424,29 @@ struct proxy_pipe {
 //		printf("AFTER: %u (head = %p)\n", sndq.svc, pqh_head(&sndq.pq));
 	}
 	void inject(pqhead_t *pqh) { sndq.pull(pqh); }
+	bool done();
+	bool running() { return !sndq.is_empty(); }
 };
 
 #define EV_IOMASK (EV_READ | EV_WRITE)
+
+bool
+proxy_pipe::done()
+{
+/*	printf("*** done\n  sndq is %sbroken" lcc_NORMAL " and %sempty" lcc_NORMAL "\n",
+			state & PIPE_BROKEN ? lcc_RED : lcc_GREEN "not ",
+			sndq.is_empty() ? lcc_YELLOW : lcc_GREEN "not ");
+			*/
+	if (state & PIPE_BROKEN)
+		return true;
+/*	printf("  rcvq is %s" lcc_NORMAL " and %sempty" lcc_NORMAL "\n",
+			state & PIPE_EOF ? lcc_RED "EOF" : lcc_GREEN "ok",
+			rcvq.is_empty() ? lcc_YELLOW : lcc_GREEN "not ");
+			*/
+	if ((state & PIPE_EOF) && rcvq.is_empty() && sndq.is_empty())
+		return true;
+	return false;
+}
 
 /* read packets from pipe::in to rcvq */
 int
@@ -436,6 +456,7 @@ proxy_pipe::handle_read_event(EV_P)
 		state |= PIPE_EOF;
 		ev_io_stop(EV_A_ &in);
 	}
+	printf("handle_read_event: state = %d\n", state);
 
 	return 0;
 }
@@ -447,12 +468,17 @@ proxy_pipe::handle_write_event(EV_P)
 	int result = sndq.send(out.fd);
 	if (result == -1) {
 		state |= PIPE_BROKEN;
+		shutdown(in.fd, SHUT_RD);
 	}
+
 	if (result <= 0) {
 		ev_io_stop(EV_A_ &out);
+		if ((state & PIPE_EOF) && rcvq.is_empty())
+			shutdown(out.fd, SHUT_WR);
 	} else {
 		ev_io_start(EV_A_ &out);
 	}
+	printf("handle_write_event: state = %d\n", state);
 
 	return 0;
 }
@@ -467,12 +493,17 @@ public:
 	rf_session(int cli, int srv);
 	~rf_session() { close(c2s.in.fd); close(c2s.out.fd); }
 
-	bool done() { return ((c2s.state & PIPE_EOF) && (s2c.state & PIPE_EOF)) || (c2s.state & PIPE_BROKEN) || (s2c.state & PIPE_BROKEN); }
+	bool done(); // { return ((c2s.state & PIPE_EOF) && (s2c.state & PIPE_EOF)) || (c2s.state & PIPE_BROKEN) || (s2c.state & PIPE_BROKEN); }
 
 	void run(EV_P) { c2s.run(EV_A); s2c.run(EV_A); }
 	void stop(EV_P) { c2s.stop(EV_A); s2c.stop(EV_A); }
 	void filter(int dir);
 };
+
+bool rf_session::done()
+{
+	return c2s.done() && s2c.done();
+}
 
 
 /* Handle read/write event on client descriptor */
@@ -522,17 +553,18 @@ rf_session::filter(int dir)
 	proxy_pipe &p = dir == SRV_TO_CLI ? s2c : c2s;
 
 	while ((pkt = p.pop_in())) {
-//		pqhead_t pre, post;
-//		pqh_init(&pre);
-//		pqh_init(&post);
+		pqhead_t pre, post;
+		pqh_init(&pre);
+		pqh_init(&post);
 
-//		s2c.inject(&pre);
-//		c2s.inject(&pre);
+		s2c.inject(&pre);
+		c2s.inject(&pre);
 //		dump_pkt(pkt);
 		p.push_out(pkt);
-//		s2c.inject(&post);
-//		c2s.inject(&post);
+		s2c.inject(&post);
+		c2s.inject(&post);
 	}
+//	printf(lcc_CYAN "%d" lcc_NORMAL " packets transferred\n", count);
 }
 
 rf_session::rf_session(int cli, int srv)
