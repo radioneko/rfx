@@ -36,8 +36,12 @@ static void dump_pkt(rf_packet_t *pkt)
 	else
 		dir = lcc_CYAN "<<== c2s";
 
-	printf(lcc_YELLOW "\n%s%s" lcc_NORMAL " packet " lcc_GREEN "0x%04x" lcc_NORMAL ", len = %u " lcc_NORMAL "\n",
+	printf(lcc_YELLOW "\n%s%s" lcc_NORMAL " packet " lcc_GREEN "0x%04x" lcc_NORMAL ", len = %u",
 			dir, state, pkt->type, pkt->len);
+	if (pkt->desc)
+		printf(lcc_PURPLE " (%s)", pkt->desc);
+	printf(lcc_NORMAL "\n");
+
 	hexdump(stdout, 0, pkt->data, pkt->len);
 }
 
