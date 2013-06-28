@@ -45,11 +45,23 @@ static unsigned rf_conn_timeout = 15;
 
 static addr_t rf_sa;
 
+static char*
+now_asc(char *buf, unsigned bufsz)
+{
+	struct tm t;
+	time_t now = time(NULL);
+	localtime_r(&now, &t);
+	strftime(buf, bufsz, "%H:%M:%S", &t);
+	return buf;
+}
+
 void log_perror(const char *what, ...)
 {
 	va_list ap;
+	char tb[64];
 	int err = errno;
 	va_start(ap, what);
+	fprintf(stderr, "[%s] ", now_asc(tb, sizeof(tb)));
 	fwrite(lcc_RED, sizeof(lcc_RED) - 1, 1, stderr);
 	vfprintf(stderr, what, ap);
 	va_end(ap);
@@ -60,8 +72,10 @@ void log_perror(const char *what, ...)
 void log_error(const char *what, ...)
 {
 	va_list ap;
+	char tb[64];
 	int err = errno;
 	va_start(ap, what);
+	fprintf(stderr, "[%s] ", now_asc(tb, sizeof(tb)));
 	fwrite(lcc_RED, sizeof(lcc_RED) - 1, 1, stderr);
 	vfprintf(stderr, what, ap);
 	va_end(ap);
@@ -72,8 +86,10 @@ void log_error(const char *what, ...)
 void log_info(const char *what, ...)
 {
 	va_list ap;
+	char tb[64];
 	int err = errno;
 	va_start(ap, what);
+	fprintf(stderr, "[%s] ", now_asc(tb, sizeof(tb)));
 	fwrite(lcc_CYAN, sizeof(lcc_CYAN) - 1, 1, stderr);
 	vfprintf(stderr, what, ap);
 	va_end(ap);
@@ -352,7 +368,6 @@ rfx_module::load()
 	void *h = dlopen(soname.c_str(), RTLD_LOCAL | RTLD_NOW);
 	void *sym;
 
-	printf("%p\n%p\n", h, dlh);
 	if (!h) {
 		log_error("dlopen('%s') failed: %s", soname.c_str(), dlerror());
 		return false;
@@ -364,10 +379,6 @@ rfx_module::load()
 		goto bad_module;
 	}
 
-	printf( "API version:\n"
-			"    core = %s\n"
-			"    mod  = %s\n",
-			rfx_api_ver, (char*)sym);
 	if (strcmp((char*)sym, rfx_api_ver) != 0) {
 		log_error("%s: API version mismatch\n  core:   %s\n  module: %s", soname.c_str(), rfx_api_ver, (char*)sym);
 		goto bad_module;
@@ -393,51 +404,41 @@ bad_module:
 void
 rfx_module::reload()
 {
-	void *h_prev = dlh;
-	rfx_filter_proc f_prev = filter_new;
 	rfx_instance *i;
 
-	if (!load())
-		goto restore;
-
-	/* walk over all instances */
-	TAILQ_FOREACH(i, &ih, ilink) {
-		i->flt_new = filter_new();
-		if (!i->flt_new)
-			goto rollback;
+	if (dlh) {
+		/* save state and destory previous filters */
+		TAILQ_FOREACH(i, &ih, ilink) {
+			if (i->flt) {
+				i->st = i->flt->save_state();
+				delete i->flt;
+				i->flt = NULL;
+			}
+		}
+		dlclose(dlh);
+		dlh = NULL;
+		filter_new = NULL;
 	}
 
-	/* walk once more to update state */
+	if (!load())
+		goto failure;
+
+	/* recreate filters */
 	TAILQ_FOREACH(i, &ih, ilink) {
-		if (i->flt) {
-			i->st = i->flt->save_state();
-			if (i->st) {
-				i->flt_new->load_state(i->st);
-				delete i->st;
-				i->st = NULL;
-			}
-			delete i->flt;
+		i->flt = filter_new();
+		if (i->st) {
+			i->flt->load_state(i->st);
+			delete i->st;
+			i->st = NULL;
 		}
-		i->flt = i->flt_new;
-		i->flt_new = NULL;
 	}
 
 	/* unload previous module instance */
-	dlclose(h_prev);
 	log_info("module %s reloaded", soname.c_str());
 
 	return;
-rollback:
-	TAILQ_FOREACH(i, &ih, ilink) {
-		if (!i->flt_new)
-			break;
-		delete i->flt_new;
-		i->flt_new = NULL;
-	}
-restore:
+failure:
 	log_error("module %s reload failed", soname.c_str());
-	dlh = h_prev;
-	filter_new = f_prev;
 }
 
 /* return true if module needs reloading */
