@@ -1,0 +1,15 @@
+Tools for fetching info from rf-info.info database.
+
+rf-import.py
+  Fetch loot description tables and assign base tags from
+  url names.
+
+rf-tag.py
+  Extended tagger that analyses individual item pages and
+  adds advanced tags (like class, atk/def etc)
+
+rf-export.py
+  Export XML item database to csv
+
+de-rf-info.py
+  Fetch and remove watermark from rf-info item icons
