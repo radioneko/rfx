@@ -32,6 +32,7 @@ extern "C" {
 rf_packet_t		*pkt_new(unsigned len, unsigned type, int dir);
 rf_packet_t		*pkt_ref(rf_packet_t *pkt);
 void			pkt_unref(rf_packet_t *pkt);
+void			pkt_dump(rf_packet_t *pkt);
 
 void			pqh_init(pqhead_t *pqh);
 void			pqh_clear(pqhead_t *pqh);

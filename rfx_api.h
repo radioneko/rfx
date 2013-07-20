@@ -27,8 +27,10 @@ struct rfx_state {
 	rfx_state(int v) : version(v), pos(0) {}
 	unsigned read(void *dst, unsigned len) {
 		unsigned l = state.size() - pos < len ? state.size() - pos : len;
-		memcpy(dst, &state[0] + pos, l);
-		pos += l;
+		if (l) {
+			memcpy(dst, &state[0] + pos, l);
+			pos += l;
+		}
 		return l;
 	}
 

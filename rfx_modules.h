@@ -3,6 +3,8 @@
 #include "evq.h"
 #include <string>
 
+#define sdw(s, var) s->write(&var, sizeof(var))
+#define sdr(s, var) s->read(&var, sizeof(var))
 enum {
 	RFXEV_WCHAT_SENT = 1,
 	RFXEV_WCHAT_RECV,

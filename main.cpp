@@ -25,26 +25,6 @@ static void proxy_run(EV_P_ int cli, int srv);
 static void load_plugins(const char *plugin, ...);
 static void reload_plugins();
 
-static void dump_pkt(rf_packet_t *pkt)
-{
-	const char *state = "", *dir;
-
-	if (pkt->drop)
-		state = lcc_RED " [DROPPED]";
-	if (pkt->dir == SRV_TO_CLI)
-		dir = lcc_PURPLE "==>> s2c";
-	else
-		dir = lcc_CYAN "<<== c2s";
-
-	printf(lcc_YELLOW "\n%s%s" lcc_NORMAL " packet " lcc_GREEN "0x%04x" lcc_NORMAL ", len = %u",
-			dir, state, pkt->type, pkt->len);
-	if (pkt->desc)
-		printf(lcc_PURPLE " (%s)", pkt->desc);
-	printf(lcc_NORMAL "\n");
-
-	hexdump(stdout, 0, pkt->data, pkt->len);
-}
-
 static unsigned rf_conn_timeout = 15;
 
 static addr_t rf_sa;
@@ -715,7 +695,7 @@ rf_session::filter(int dir)
 
 		/* 4. dump packet if debug info requested */
 		if (pkt->show)
-			dump_pkt(pkt);
+			pkt_dump(pkt);
 
 		/* 5. append packet itself */
 		if (!pkt->drop) {
