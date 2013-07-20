@@ -1,6 +1,6 @@
 OBJDIR := build
 DLDIR := dl
-CFLAGS := -Wall -g -O0 -fno-inline -Iinclude
+CFLAGS := -Wall -g -O0 -fno-inline -Iinclude -D_GNU_SOURCE
 CXXFLAGS := $(CFLAGS)
 
 C_SRC := lib/daemonize.c lib/ini.c lib/mconf.c lib/misc.c lib/sock.c pktq.c
@@ -14,7 +14,7 @@ proxy: $(OBJDIR)/main.o $(OBJDIR)/proxy.o $(OBJDIR)/evq.o \
        $(OBJDIR)/pktq.o api_version.c libutil.a
 	$(CXX) -o $@ $^ -lev -ldl
 
-$(DLDIR)/%.so: $(OBJDIR)/pic_%.o api_version.c librfxmod.a
+$(DLDIR)/%.so: $(OBJDIR)/pic_%.o $(OBJDIR)/pic_misc.o api_version.c librfxmod.a
 	$(CXX) -shared -fPIC -DPIC -o $@ $^
 
 ifeq ($(filter dep clean,$(MAKECMDGOALS)),)

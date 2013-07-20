@@ -1,6 +1,9 @@
 #include "pktq.h"
+#include "cconsole.h"
+#include "util.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdarg.h>
 
 /* Create packet. length is suposed to include packet header (len & type) */
 rf_packet_t*
@@ -15,6 +18,7 @@ pkt_new(unsigned len, unsigned type, int dir)
 	pkt->show = 0;
 	pkt->refc = 1;
 	pkt->desc = NULL;
+	pkt->dyn_desc = NULL;
 	pkt->delay = 0;
 
 	pkt->data[0] = len & 0xff;
@@ -37,8 +41,26 @@ pkt_ref(rf_packet_t *pkt)
 void
 pkt_unref(rf_packet_t *pkt)
 {
-	if (!--pkt->refc)
+	if (!--pkt->refc) {
+		if (pkt->dyn_desc)
+			free(pkt->dyn_desc);
 		free(pkt);
+	}
+}
+
+char*
+pkt_dsprintf(rf_packet_t *pkt, const char *fmt, ...)
+{
+	va_list ap;
+	char *desc = NULL;
+	va_start(ap, fmt);
+	if (vasprintf(&desc, fmt, ap)) {
+		if (pkt->dyn_desc)
+			free(pkt->dyn_desc);
+		pkt->dyn_desc = desc;
+	}
+	va_end(ap);
+	return desc;
 }
 
 /* Pretty print packet contents */
@@ -55,7 +77,9 @@ void pkt_dump(rf_packet_t *pkt)
 
 	printf(lcc_YELLOW "\n%s%s" lcc_NORMAL " packet " lcc_GREEN "0x%04x" lcc_NORMAL ", len = %u",
 			dir, state, pkt->type, pkt->len);
-	if (pkt->desc)
+	if (pkt->dyn_desc)
+		printf(lcc_PURPLE " (%s)", pkt->dyn_desc);
+	else if (pkt->desc)
 		printf(lcc_PURPLE " (%s)", pkt->desc);
 	printf(lcc_NORMAL "\n");
 

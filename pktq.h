@@ -19,6 +19,7 @@ typedef struct rf_packet {
 	unsigned				refc;
 	unsigned				delay;			/* delay before this packet sending (in milliseconds) */
 	const char				*desc;			/* description (for debug purposes) */
+	char					*dyn_desc;		/* dynamically allocated changeable description */
 	TAILQ_ENTRY(rf_packet)	link;
 	uint8_t					data[0];		/* this header also includes length and data fields */
 } rf_packet_t;
@@ -33,6 +34,8 @@ rf_packet_t		*pkt_new(unsigned len, unsigned type, int dir);
 rf_packet_t		*pkt_ref(rf_packet_t *pkt);
 void			pkt_unref(rf_packet_t *pkt);
 void			pkt_dump(rf_packet_t *pkt);
+/* set printf-like packet description */
+char*			pkt_dsprintf(rf_packet_t *pkt, const char *fmt, ...);
 
 void			pqh_init(pqhead_t *pqh);
 void			pqh_clear(pqhead_t *pqh);
