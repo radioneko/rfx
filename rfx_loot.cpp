@@ -2,10 +2,14 @@
 #include "rfx_modules.h"
 #include <string.h>
 #include <stdio.h>
+#include <map>
 
 #define	LOOT_DROP_NEW		0x1403
 #define	LOOT_DROP_HORIZON	0x0f04
 #define	LOOT_DISAPPEAR		0x1c03
+
+#define	ITEM_PICK			0x0207
+#define PICK_RESPONSE		0x0407
 
 #if 0
 template<typename T>
@@ -22,126 +26,66 @@ struct refptr {
 };
 #endif
 
-/* loot mask {{{ */
-struct loot_mask {
-	uint8_t			mask[8192];
 
-	loot_mask(bool flag) { set(flag); }
-	loot_mask(const loot_mask &m) { memcpy(mask, m.mask, sizeof(mask)); }
+/* ground drop set {{{ */
+struct ground_item {
+	unsigned		id;			/* hex id of the item */
+	unsigned		ground_id;	/* identifier of the item layin on ground */
+	rf_packet_t		*source;	/* packet that generated that item */
 
-	void set(bool flag) { memset(mask, flag ? 0xff : 0, sizeof(mask)); }
-	bool set(unsigned idx, bool flag);
-	bool test(unsigned idx);
-	bool operator()(unsigned idx) { return test(idx); }
-	loot_mask & operator +=(const unsigned);
-	loot_mask & operator -=(const unsigned);
-	loot_mask & operator +=(const loot_mask &m);
-	loot_mask & operator -=(const loot_mask &m);
-	loot_mask & operator =(const loot_mask &m) { memcpy(mask, m.mask, sizeof(mask)); return *this; }
-	rfx_state	*save(rfx_state *s) { s->write(mask, sizeof(mask)); return s; }
-	bool		restore(rfx_state *s) { return s->read(mask, sizeof(mask)) == sizeof(mask); }
-	unsigned	count();
+	ground_item() : id(0), ground_id(0), source(NULL) {}
+	ground_item(unsigned id, unsigned ground_id, rf_packet_t *source) : id(id), ground_id(ground_id), source(source) {
+		if (source)
+			pkt_ref(source);
+	}
+	ground_item(const ground_item &gi) : source(NULL) { *this = gi; }
+	~ground_item() { if (source) pkt_unref(source); }
 
-	bool		fsave(const char *name);
-	bool		fload(const char *name);
+	ground_item& operator=(const ground_item &gi) {
+		id = gi.id;
+		ground_id = gi.ground_id;
+		if (gi.source)
+			pkt_ref(gi.source);
+		if (source)
+			pkt_unref(source);
+		source = gi.source;
+		return *this;
+	}
 };
 
-unsigned
-loot_mask::count()
-{
-	unsigned i, s = 0;
-	for (i = 0; i < sizeof(mask); i++) {
-		for (uint8_t j = 0x80; j; j >>= 1)
-			if (j & mask[i])
-				s++;
-	}
-	return s;
-}
-
-bool
-loot_mask::test(unsigned idx)
-{
-	unsigned i = idx >> 3;
-	if (i < sizeof(mask))
-		return (0x80 >> (idx & 7)) & mask[i];
-	return false;
-}
-
-bool
-loot_mask::set(unsigned idx, bool flag)
-{
-	bool result = false;
-	unsigned i = idx >> 3;
-	if (i < sizeof(mask)) {
-		uint8_t m = 0x80 >> (idx & 7);
-		result = mask[i] & m;
-		if (flag)
-			mask[i] |= m;
-		else
-			mask[i] &= ~m;
-	}
-	return result;
-}
-
-loot_mask&
-loot_mask::operator +=(const loot_mask &m)
-{
-	unsigned i;
-	for (i = 0; i < sizeof(mask); i++)
-		mask[i] |= m.mask[i];
-	return *this;
-}
-
-loot_mask&
-loot_mask::operator -=(const loot_mask &m)
-{
-	unsigned i;
-	for (i = 0; i < sizeof(mask); i++)
-		mask[i] &= ~m.mask[i];
-	return *this;
-}
-
-bool
-loot_mask::fsave(const char *name)
-{
-	FILE *f = fopen(name, "w");
-	if (f) {
-		int sz = fwrite(mask, 1, sizeof(mask), f);
-		fclose(f);
-		return sz == sizeof(mask);
-	}
-	return false;
-}
-
-bool
-loot_mask::fload(const char *name)
-{
-	FILE *f = fopen(name, "r");
-	if (f) {
-		int sz = fread(mask, 1, sizeof(mask), f);
-		fclose(f);
-		return sz == sizeof(mask);
-	} else {
-		printf("Can't ope '%s'\n", name);
-	}
-	return false;
-}
+typedef std::map<unsigned, ground_item> ground_items;
 /* }}} */
 
+static rf_packet_t*
+make_pick_request(unsigned ground_id, unsigned inventory_cell)
+{
+	rf_packet_t *pkt = pkt_new(8, ITEM_PICK, CLI_TO_SRV);
+	uint8_t *p = pkt->data + 4;
+	*p++ = ground_id & 0xff;
+	*p++ = (ground_id >> 8) & 0xff;
+	*p++ = inventory_cell & 0xff;
+	*p++ = (inventory_cell >> 8) & 0xff;
+	pkt->desc = "[INJECT] pick request";
+	//pkt_dump(pkt);
+	return pkt;
+}
 
 struct loot_state {
 	loot_mask		show;
 	loot_mask		pick;
+	unsigned		inv_cell;
 
-	loot_state() : show(true), pick(false) {}
+	loot_state() : show(true), pick(false), inv_cell(0xffff) {}
 	loot_state(const loot_state &s) : show(s.show), pick(s.pick) {}
 
-	bool save(rfx_state *s) { show.save(s); pick.save(s); return true; }
-	bool restore(rfx_state *s) { return show.restore(s) && pick.restore(s); }
+	bool save(rfx_state *s) { show.save(s); pick.save(s); s->write(&inv_cell, sizeof(inv_cell)); return true; }
+	bool restore(rfx_state *s) { return show.restore(s) && pick.restore(s); s->read(&inv_cell, sizeof(inv_cell)); }
 };
 
 class rfx_loot : public rfx_filter {
 	loot_state		lm;
+	ground_items	gi;
+	unsigned		last_pick;
 public:
 	rfx_loot() {}
 
@@ -151,7 +95,7 @@ public:
 	void save_state(rfx_state *s) { lm.save(s); }
 	bool load_state(rfx_state *s) { return lm.restore(s);  }
 
-	std::string loot_cmd(const std::string &msg);
+	std::string loot_cmd(const std::string &msg, loot_mask &m);
 };
 
 int
@@ -161,101 +105,85 @@ rfx_loot::process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_t *ev
 	switch (pkt->type) {
 	case LOOT_DROP_NEW:
 		pkt->desc = "new item on the ground";
-		id = GET_INT16(pkt->data + 4);
-//		pkt->show = 1;
+		id = GET_INT24(pkt->data + 4);
+		pkt->show = 1;
 		break;
 	case LOOT_DROP_HORIZON:
 		pkt->desc = "new item at the vision range";
-		id = GET_INT16(pkt->data + 4);
+		id = GET_INT24(pkt->data + 4);
 //		pkt->show = 1;
 		break;
 	case LOOT_DISAPPEAR:
 		pkt->desc = "loot disappear";
+//		pkt->show = 1;
+		if (pkt->len >= 6) {
+			unsigned ground_id = GET_INT16(pkt->data + 4);
+			gi.erase(ground_id);
+		}
+		break;
+	case ITEM_PICK:
+		pkt->desc = "item pick request";
 		pkt->show = 1;
+		break;
+	case PICK_RESPONSE:
+		pkt->desc = "loot pick response";
+		pkt->show = 1;
+		if (pkt->len >= 7 && pkt->data[4] == 0 && !gi.empty()) {
+			/* successful pickup */
+			ground_items::iterator i = gi.begin();
+			last_pick = i->first;
+			lm.inv_cell = pkt->data[5];
+			pqh_push(post, make_pick_request(last_pick, lm.inv_cell));
+		} else if (pkt->data[4] == 9 && !gi.empty()) { // rate limit, huh?
+			rf_packet_t *pi;
+			ground_items::iterator i = gi.begin();
+			last_pick = i->first;
+			pi = make_pick_request(last_pick, lm.inv_cell);
+			pi->delay = 100; /* 100 ms delay */
+			pqh_push(post, pi);
+			pkt->drop = 1;
+		}
+#if 0
+		{
+			uint8_t code = pkt->data[4];
+			unsigned ground_id = GET_INT16(pkt->data + 5);
+			uint8_t count = 0xff;
+			if (pkt->len >= 8)
+				count = pkt->data[7];
+			printf("pick: %u, 0x%04x, count = %u\n", code, ground_id, count);
+		}
+#endif
 		break;
 	}
 	if (id != -1) {
+		evq->push_back(new rfx_loot_event(id, 0 /* TODO: get count from packet */,
+					GET_INT16(pkt->data + 8) /*ground_id */, pkt));
+		if (lm.pick.test(id)) {
+			unsigned ground_id = GET_INT16(pkt->data + 8);
+			last_pick = ground_id;
+			gi[ground_id] = ground_item(id, ground_id, pkt);
+		}
 		pkt->drop = !lm.show.test(id);
 	}
 	return RFX_DECLINE;
 }
 
 
-enum {
-	OP_SET,
-	OP_ADD,
-	OP_SUB
-};
-
-static bool
-parse_mask(loot_mask &m, const char *n, unsigned nl)
-{
-	if (nl == 3 && memcmp(n, "all", 3) == 0) {
-		m.set(true);
-		return true;
-	}
-	if (nl == 4 && memcmp(n, "none", 4) == 0) {
-		m.set(false);
-		return true;
-	}
-	if (nl > 1 && *n == '@') {
-		/* file name requested */
-		char fn[64];
-		snprintf(fn, sizeof(fn), "drop/list-%.*s.bin", nl - 1, n + 1);
-		if (!m.fload(fn))
-			return false;
-		return true;
-	}
-	if (nl > 2 && n[0] == '0' && n[1] == 'x') {
-		unsigned id = 0, i;
-		for (i = 2; i < nl && isxdigit(n[i]); i++) {
-			id <<= 4;
-			id |= hex2i(n[i]);
-		}
-		m.set(false);
-		m.set(id, true);
-		return true;
-	}
-	return false;
-}
-
 std::string
-rfx_loot::loot_cmd(const std::string &msg)
+rfx_loot::loot_cmd(const std::string &msg, loot_mask &m)
 {
-	const char *m;
 	char reply[32];
-	loot_mask d(false), nm(lm.show);
+	loot_mask nm(m);
 
 	if (msg == "info")
 		goto reply;
 
-	for (m = msg.c_str(); *m; ) {
-		unsigned op = OP_SET, i;
+	if (!nm.parse(msg))
+		return "can't parse loot mask";
 
-		while (isspace(*m)) m++;
-		if (!*m)
-			break;
-		switch (*m) {
-		case '+':	m++; op = OP_ADD; break;
-		case '-':	m++; op = OP_SUB; break;
-		}
-		
-		for (i = 0; m[i] && m[i] != '+' && m[i] != '-' && !isspace(m[i]); i++)
-			/* void */ ;
-		if (!parse_mask(d, m, i))
-			return "can't parse loot mask";
-
-		switch (op) {
-		case OP_ADD:	nm += d; break;
-		case OP_SUB:	nm -= d; break;
-		case OP_SET:	nm = d; break;
-		}
-
-		m += i;
-	}
 reply:
 	unsigned count = nm.count();
-	lm.show = nm;
+	m = nm;
 	snprintf(reply, sizeof(reply), "ok, show = %u, ignore = %u", count, 65536 - count);
 	return reply;
 }
@@ -266,13 +194,18 @@ rfx_loot::process(rfx_event *ev, pqhead_t *pre, pqhead_t *post, evqhead_t *evq)
 	if (ev->what == RFXEV_PRIV_SENT) {
 		rfx_chat_event *e = (rfx_chat_event*)ev;
 		if (e->nick == "loot") {
-			std::string reply = loot_cmd(e->msg);
+			std::string reply = loot_cmd(e->msg, lm.show);
 			evq->push_back(new rfx_chat_event(RFXEV_SEND_REPLY, e->nick, reply, NULL));
-			ev->drop_source();
-			rf_packet_t *pkt = ev->get_source();
-			if (pkt) pkt->show = 0;
+			ev->ignore_source();
+			return RFX_BREAK;
+		} else if (e->nick == "pick") {
+			std::string reply = loot_cmd(e->msg, lm.pick);
+			evq->push_back(new rfx_chat_event(RFXEV_SEND_REPLY, e->nick, reply, NULL));
+			ev->ignore_source();
 			return RFX_BREAK;
 		}
+//	} else if (ev->what == RFXEV_BACKPACK_PICK) {
+		/* we were requested to pick an item */
 	}
 	return RFX_DECLINE;
 }

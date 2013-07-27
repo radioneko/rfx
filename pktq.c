@@ -1,4 +1,6 @@
 #include "pktq.h"
+#include "util.h"
+#include "cconsole.h"
 #include <stdlib.h>
 #include <stdio.h>
 

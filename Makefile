@@ -8,7 +8,7 @@ CXX_SRC := main.cpp proxy.cpp evq.cpp rfx_chat.cpp rfx_loot.cpp
 
 VPATH = lib
 
-all: proxy libutil.a $(DLDIR)/rfx_chat.so $(DLDIR)/rfx_loot.so $(DLDIR)/rfx_debug.so
+all: proxy libutil.a $(DLDIR)/rfx_chat.so $(DLDIR)/rfx_loot.so $(DLDIR)/rfx_debug.so $(DLDIR)/rfx_inventory.so
 
 proxy: $(OBJDIR)/main.o $(OBJDIR)/proxy.o $(OBJDIR)/evq.o \
        $(OBJDIR)/pktq.o api_version.c libutil.a
@@ -38,7 +38,7 @@ libutil.a: $(OBJDIR)/daemonize.o $(OBJDIR)/mconf.o $(OBJDIR)/misc.o \
 		$(OBJDIR)/sock.o
 	ar cru $@ $^
 
-librfxmod.a: $(OBJDIR)/pic_pktq.o $(OBJDIR)/pic_evq.o $(OBJDIR)/pic_rfx_modules.o
+librfxmod.a: $(OBJDIR)/pic_pktq.o $(OBJDIR)/pic_evq.o $(OBJDIR)/pic_rfx_modules.o $(OBJDIR)/pic_misc.o
 	ar cru $@ $^
 
 .PHONY: dep

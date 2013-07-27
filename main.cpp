@@ -17,9 +17,10 @@
 #include <sys/stat.h>
 
 static const char
-	*bind_addr = "0.0.0.0:1234",
-	*rf_addr = "127.0.0.1:27780";
-//	*rf_addr = "79.165.127.244:27780";
+	*bind_addr = "0.0.0.0:2345",
+//	*rf_addr = "195.93.180.18:27780"; // pvpwar x5
+//	*rf_addr = "127.0.0.1:27780";
+	*rf_addr = "79.165.127.244:27780"; // rfka.org
 
 static void proxy_run(EV_P_ int cli, int srv);
 static void load_plugins(const char *plugin, ...);
@@ -216,7 +217,7 @@ int main(int argc, char **argv)
 	struct ev_timer pt;
 	struct ev_loop *loop = ev_default_loop(0);
 
-	load_plugins("dl/rfx_chat.so", "dl/rfx_loot.so", "dl/rfx_debug.so", NULL);
+	load_plugins("dl/rfx_chat.so", "dl/rfx_loot.so", "dl/rfx_debug.so", "dl/rfx_inventory.so", NULL);
 	if (init_addr(&bind_sa, bind_addr) != 0)
 		perror_fatal("Can't parse bind addr: `%s'", bind_addr);
 	if (init_addr(&rf_sa, rf_addr) != 0)
@@ -599,6 +600,7 @@ class rf_session {
 	proxy_pipe			s2c;
 	rfx_filter_chain	flt;
 	rf_delayed_queue	dq;
+	std::string ssid;
 	static void cli_io_cb(EV_P_ ev_io *io, int revents);
 	static void srv_io_cb(EV_P_ ev_io *io, int revents);
 public:
@@ -719,6 +721,10 @@ rf_session::rf_session(int cli, int srv)
 		  s2c(srv, cli, SRV_TO_CLI, srv_io_cb, this),
 		  dq(*this)
 {
+	static int count = 0;
+	char sid[32];
+	sprintf(sid, "%3d", ++count);
+	ssid = sid;
 	build_chain(flt);
 }
 /* }}} */
