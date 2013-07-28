@@ -62,7 +62,10 @@ struct rfx_pick_do_event : public rfx_event {
 };
 
 enum {
-	PICK_SUCCESS = 0
+	PICK_SUCCESS	= 0,
+	PICK_FULL		= 3,	/* can't add more items to stack/inventory */
+	PICK_TOOFAR		= 6,	/* item is too far away */
+	PICK_FAILED		= 127
 };
 
 /* this event is send by rfx_loot module when item pick completed */
@@ -72,7 +75,7 @@ struct rfx_loot_pick_event : public rfx_event {
 	unsigned			code;
 	uint8_t				result;
 	/* successful pickup */
-	rfx_loot_pick_event(uint16_t gid, uint16_t iid, unsigned code) : rfx_event(RFXEV_LOOT_PICK, NULL), gid(gid), iid(iid), code(code), result(PICK_SUCCESS) {}
+	rfx_loot_pick_event(uint16_t gid, uint16_t iid, unsigned code, uint8_t result = PICK_SUCCESS) : rfx_event(RFXEV_LOOT_PICK, NULL), gid(gid), iid(iid), code(code), result(result) {}
 	rfx_loot_pick_event(uint8_t result) : rfx_event(RFXEV_LOOT_PICK, NULL), gid(-1), iid(-1), code(-1), result(result) {}
 };
 

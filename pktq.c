@@ -112,8 +112,10 @@ pqh_pull(pqhead_t *src, pqhead_t *dst, int dir, struct iovec *outv, unsigned out
 	TAILQ_FOREACH_SAFE(p, src, link, tmp) {
 		if (i >= outv_sz)
 			break;
-		if (p->delay > min_delay)
+		if (p->delay > min_delay) {
+			printf("packet 0x%x is not pulled because of delay %u\n", p->type, p->delay);
 			continue;
+		}
 		if (p->dir == dir) {
 			TAILQ_REMOVE(src, p, link);
 			if (!p->drop) {

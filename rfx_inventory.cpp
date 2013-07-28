@@ -1,5 +1,6 @@
 #include "rfx_api.h"
 #include "rfx_modules.h"
+#include "cconsole.h"
 #include <stdio.h>
 #include <map>
 
@@ -58,7 +59,7 @@ backpack::alloc_iid(unsigned code)
 	/* lookup in the new_items (unbound) map */
 	for (iid_map_t::const_iterator i = new_items.begin(); i != new_items.end(); ++i) {
 		const backpack_item *ii = &i->second;
-		if (ii->code == code && ii->count >= 1 && ii->count <= 100)
+		if (ii->code == code && ii->count >= 1 && ii->count < 99)
 			return ii->iid;
 	}
 	/* look inside inventory */
@@ -66,8 +67,8 @@ backpack::alloc_iid(unsigned code)
 		const backpack_item *ii = items + idx;
 		if (ii->iid == EMPTY_CELL)
 			empty++;
-		if (ii->code == code && ii->count >= 1 && ii->count <= 100 &&
-				ii->iid != EMPTY_CELL && ii->iid != IID_UNKNOWN)
+		if (ii->iid != EMPTY_CELL && ii->iid != IID_UNKNOWN
+				&& ii->code == code && ii->count >= 1 && ii->count < 99)
 			return ii->iid;
 	}
 	/* see if we have spare cells */
@@ -205,11 +206,77 @@ backpack::dump(int filter)
 	printf("====== %u items\n", count);
 }
 /* }}} */
+/* ground item */
+struct ground_item {
+	uint16_t					gid;		/* ground id */
+	unsigned					code;		/* hex code */
+	ground_item(uint16_t gid, unsigned code) : gid(gid), code(code) {}
+	TAILQ_ENTRY(ground_item)	link;
+};
+
+typedef std::map<uint16_t, ground_item> ground_loot_t;
+/* FIFO queue of ground items to pick */
+class pick_queue {
+	bool						running;
+	ground_loot_t				loot;
+	TAILQ_HEAD(,ground_item)	gq;
+public:
+	pick_queue() : running(false) { TAILQ_INIT(&gq); }
+	/* enqueue item to pick */
+	void enqueue(uint16_t gid, unsigned code);
+	bool pick_top(uint16_t &gid, unsigned &code);
+	void remove(uint16_t gid);
+};
+
+/* pick_queue implementation {{{ */
+void
+pick_queue::enqueue(uint16_t gid, unsigned code)
+{
+	ground_loot_t::iterator gi = loot.find(gid);
+	if (gi == loot.end()) {
+		gi = loot.insert(ground_loot_t::value_type(gid, ground_item(gid, code))).first;
+	} else {
+		gi->second.gid = gid;
+		gi->second.code = code;
+		TAILQ_REMOVE(&gq, &gi->second, link);
+	}
+	TAILQ_INSERT_TAIL(&gq, &gi->second, link);
+}
+
+bool
+pick_queue::pick_top(uint16_t &gid, unsigned &code)
+{
+	if (running || TAILQ_EMPTY(&gq))
+		return false;
+	ground_item *gi = TAILQ_FIRST(&gq);
+	gid = gi->gid;
+	code = gi->code;
+	running = true;
+	return true;
+}
+
+void
+pick_queue::remove(uint16_t gid)
+{
+	ground_loot_t::iterator gi = loot.find(gid);
+	if (gi != loot.end()) {
+		if (&gi->second == TAILQ_FIRST(&gq)) {
+			printf("note: ready triggered\n");
+			running = false;
+		}
+		TAILQ_REMOVE(&gq, &gi->second, link);
+		loot.erase(gi);
+	}
+}
+/* }}} */
 
 class rfx_inventory : public rfx_filter {
-	backpack inv;
+	backpack		inv;
+	pick_queue		pq;
+	bool			autopick;
+	bool schedule_pick(evqhead_t *evq);
 public:
-	rfx_inventory() {}
+	rfx_inventory() : autopick(false) {}
 
 	int process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_t *evq);
 	int process(rfx_event *ev, pqhead_t *pre, pqhead_t *post, evqhead_t *evq);
@@ -306,6 +373,20 @@ dump_iq(const char *acode, backpack &b)
 }
 #endif
 
+bool
+rfx_inventory::schedule_pick(evqhead_t *evq)
+{
+	int iid;
+	uint16_t gid;
+	unsigned code;
+	if (autopick && pq.pick_top(gid, code) && (iid = inv.alloc_iid(code)) != -1) {
+		printf(lcc_GREEN "*** enqueued picking 0x%x to 0x%x" lcc_NORMAL "\n", gid, iid);
+		evq->push_back(new rfx_pick_do_event(gid, iid, code));
+		return true;
+	}
+	return false;
+}
+
 int
 rfx_inventory::process(rfx_event *ev, pqhead_t *pre, pqhead_t *post, evqhead_t *evq)
 {
@@ -321,11 +402,33 @@ rfx_inventory::process(rfx_event *ev, pqhead_t *pre, pqhead_t *post, evqhead_t *
 	} else if (ev->what == RFXEV_PRIV_SENT) {
 		rfx_chat_event *e = (rfx_chat_event*)ev;
 		if (e->nick == "iq") {
-			int filter = e->msg.empty() ? -1 : h2i(e->msg.c_str());
-			inv.dump(filter);
+			if (e->msg == "on") {
+				autopick = true;
+				schedule_pick(evq);
+			} else if (e->msg == "off")
+				autopick = false;
+			else {
+				int filter = e->msg.empty() ? -1 : h2i(e->msg.c_str());
+				inv.dump(filter);
+			}
 			e->ignore_source();
 			return RFX_BREAK;
 		}
+	} else if (ev->what == RFXEV_LOOT_APPEAR) {
+		/* new item on the ground */
+		rfx_loot_event *e = (rfx_loot_event*)ev;
+		if (e->code == 0x1614) {
+			pq.enqueue(e->gid, e->code);
+			schedule_pick(evq);
+		}
+	} else if (ev->what == RFXEV_LOOT_DISAPPEAR) {
+		rfx_loot_event *e = (rfx_loot_event*)ev;
+		printf("*remove loot 0x%x\n", e->gid);
+		pq.remove(e->gid);
+	} else if (ev->what == RFXEV_LOOT_PICK) {
+		rfx_loot_pick_event *e = (rfx_loot_pick_event*)ev;
+		pq.remove(e->gid);
+		schedule_pick(evq);
 	}
 	return RFX_DECLINE;
 }

@@ -1,5 +1,6 @@
 #include "rfx_api.h"
 #include "rfx_modules.h"
+#include "cconsole.h"
 #include <string.h>
 #include <stdio.h>
 #include <map>
@@ -73,21 +74,39 @@ make_pick_request(unsigned ground_id, unsigned inventory_cell)
 struct loot_state {
 	loot_mask		show;
 	loot_mask		pick;
-	unsigned		inv_cell;
 
-	loot_state() : show(true), pick(false), inv_cell(0xffff) {}
+	loot_state() : show(true), pick(false) {}
 	loot_state(const loot_state &s) : show(s.show), pick(s.pick) {}
 
-	bool save(rfx_state *s) { show.save(s); pick.save(s); s->write(&inv_cell, sizeof(inv_cell)); return true; }
-	bool restore(rfx_state *s) { return show.restore(s) && pick.restore(s); s->read(&inv_cell, sizeof(inv_cell)); }
+	bool save(rfx_state *s) { show.save(s); pick.save(s); return true; }
+	bool restore(rfx_state *s) { return show.restore(s) && pick.restore(s); }
+};
+
+struct pick_request {
+	/* gid & iid are mandatory */
+	uint16_t		gid;		/* ground_id */
+	uint16_t		iid;		/* inventory id */
+	unsigned		code;		/* optional, not always known */
+	//rf_packet_t		*rq;		/* generated pick request */
+	pick_request() /*: rq(NULL)*/ {}
+	~pick_request() { release(); }
+	void release() { /* if (rq) { pkt_unref(rq); rq = NULL; } */ }
+	rf_packet_t *operator()(rfx_pick_do_event *e) {
+		rf_packet_t *rq;
+		gid = e->gid; iid = e->iid; code = e->code;
+		rq = make_pick_request(gid, iid);
+		return rq;
+	}
+	rf_packet_t* operator()() {
+		return make_pick_request(gid, iid);
+	}
 };
 
 class rfx_loot : public rfx_filter {
 	loot_state		lm;
-	ground_items	gi;
-	unsigned		last_pick;
+	pick_request	pick_rq, *prq;
 public:
-	rfx_loot() {}
+	rfx_loot() : prq(NULL) {}
 
 	int process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_t *evq);
 	int process(rfx_event *ev, pqhead_t *pre, pqhead_t *post, evqhead_t *evq);
@@ -114,55 +133,103 @@ rfx_loot::process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_t *ev
 //		pkt->show = 1;
 		break;
 	case LOOT_DISAPPEAR:
+		/* generate RFXEV_LOOT_DISAPPEAR */
 		pkt->desc = "loot disappear";
 //		pkt->show = 1;
 		if (pkt->len >= 6) {
 			unsigned ground_id = GET_INT16(pkt->data + 4);
-			gi.erase(ground_id);
+#if 0
+			if (prq && prq->gid == ground_id) {
+				/* if we were trying to pick this item, generate "PICK_FAILED" */
+				/* generate "pick failed" event */
+				evq->push_back(new rfx_loot_pick_event(prq->gid, prq->iid, prq->code, PICK_FAILED));
+				prq->release();
+				prq = NULL;
+			}
+#endif
+			/* generate "loot disappear" event */
+			evq->push_back(new rfx_loot_event(ground_id));
 		}
 		break;
 	case ITEM_PICK:
+		/* we block all pick requests while we're in automatic pick mode */
 		pkt->desc = "item pick request";
 		pkt->show = 1;
+		if (prq) {
+			/* drop this packet if automatic pick operation already in progress */
+			rf_packet_t *rej = pkt_new(5, PICK_RESPONSE, SRV_TO_CLI);
+			rej->data[5] = 9;	/* "error 0" */
+			pqh_push(post, rej);
+			pkt->drop = 1;
+		}
+		break;
+	/* an ugly hack, but... */
+	case 0x0307:
+		if (prq && prq->iid == 0xffff) {
+			if (pkt->len >= 16 && pkt->data[4] == 0 && prq->code == GET_INT24(pkt->data + 5)) { /* len >= 16 is taken at random */
+				/* workaround for new stacks, when prq->iid is 0xffff and read iid is only given in "new item" packet */
+				printf(lcc_WHITE "*** EMITTING new stack!" lcc_NORMAL "\n");
+				evq->push_back(new rfx_loot_pick_event(prq->gid, GET_INT16(pkt->data + 0x14), prq->code));
+				prq->release();
+				prq = NULL;
+			} else if (pkt->data[4] == 9) {
+				/* rate limit, resend */
+				rf_packet_t *rq = pick_rq();
+				rq->delay = 200; /* 100 ms delay */
+				pqh_push(post, rq);
+			} else {
+				evq->push_back(new rfx_loot_pick_event(prq->gid, prq->iid, prq->code, PICK_FAILED));
+				prq->release();
+				prq = NULL;
+				printf(lcc_GRAY "*** pick failure: %d" lcc_NORMAL "\n", pkt->data[4]);
+			}
+		}
 		break;
 	case PICK_RESPONSE:
 		pkt->desc = "loot pick response";
 		pkt->show = 1;
-		if (pkt->len >= 7 && pkt->data[4] == 0 && !gi.empty()) {
+		if (pkt->len >= 7 && pkt->data[4] == 0 && prq) {
 			/* successful pickup */
-			ground_items::iterator i = gi.begin();
-			last_pick = i->first;
-			lm.inv_cell = pkt->data[5];
-			pqh_push(post, make_pick_request(last_pick, lm.inv_cell));
-		} else if (pkt->data[4] == 9 && !gi.empty()) { // rate limit, huh?
-			rf_packet_t *pi;
-			ground_items::iterator i = gi.begin();
-			last_pick = i->first;
-			pi = make_pick_request(last_pick, lm.inv_cell);
-			pi->delay = 100; /* 100 ms delay */
-			pqh_push(post, pi);
+			uint16_t iid = GET_INT16(pkt->data + 5);
+			if (prq->iid == iid) {
+				/* we've picked exactly what we were requested to */
+				printf("*** EMIT gid = 0x%x, iid = 0x%x, code = 0x%x\n", prq->gid, prq->iid, prq->code);
+				evq->push_back(new rfx_loot_pick_event(prq->gid, prq->iid, prq->code));
+				prq->release();
+				prq = NULL;
+			} else {
+				printf("picked 0x%x, wanted 0x%x\n", iid,  prq ? prq->iid : 0xffff);
+				prq->release();
+				prq = NULL;
+			}
+		} else if (pkt->data[4] == 9 && prq) { // rate limit, huh? we'll just resend packet!
+			rf_packet_t *rq = pick_rq();
+//			if (prq->rq->delayed)
+//				printf(lcc_RED "******************************** RESCHEDULING already scheduled packet!" lcc_NORMAL "\n");
+//			else {
+				/* resend packet only if it is not waiting on the queue already */
+				rq->delay = 200; /* 100 ms delay */
+				printf(lcc_YELLOW "*** resending 0x%x (refc = %u)" lcc_NORMAL, prq->gid, rq->refc);
+				//pkt_dump(rq);
+				pqh_push(post, rq);
+//			}
 			pkt->drop = 1;
+			pkt->show = 1;
+		} else if (prq && pkt->data[4]) {
+			/* some kind of error occured */
+			evq->push_back(new rfx_loot_pick_event(prq->gid, prq->iid, prq->code, PICK_FAILED));
+			prq->release();
+			prq = NULL;
+			printf(lcc_GRAY "*** pick failure: %d" lcc_NORMAL "\n", pkt->data[4]);
+		} else {
+			printf("=======================================\nBUGGGGGGGGGGGG (prq = %p, code = %u)\n===============================\n\n", prq, pkt->data[4]);
 		}
-#if 0
-		{
-			uint8_t code = pkt->data[4];
-			unsigned ground_id = GET_INT16(pkt->data + 5);
-			uint8_t count = 0xff;
-			if (pkt->len >= 8)
-				count = pkt->data[7];
-			printf("pick: %u, 0x%04x, count = %u\n", code, ground_id, count);
-		}
-#endif
 		break;
 	}
 	if (id != -1) {
-		evq->push_back(new rfx_loot_event(id, 0 /* TODO: get count from packet */,
+		/* generate "new loot" event */
+		evq->push_back(new rfx_loot_event(id, pkt->data[7] /* count */,
 					GET_INT16(pkt->data + 8) /*ground_id */, pkt));
-		if (lm.pick.test(id)) {
-			unsigned ground_id = GET_INT16(pkt->data + 8);
-			last_pick = ground_id;
-			gi[ground_id] = ground_item(id, ground_id, pkt);
-		}
 		pkt->drop = !lm.show.test(id);
 	}
 	return RFX_DECLINE;
@@ -177,6 +244,19 @@ rfx_loot::loot_cmd(const std::string &msg, loot_mask &m)
 
 	if (msg == "info")
 		goto reply;
+	if (msg.compare(0, 5, "save ") == 0) {
+		const char *s = msg.c_str() + 5;
+		while (isspace(*s))
+			s++;
+		if (!*s)
+			return "name required";
+		std::string fn = "drop/list-";
+		fn += s;
+		fn += ".bin";
+		return lm.show.fsave(fn.c_str())
+			? std::string(s) + " saved"
+			: std::string("can't save ") + s;
+	}
 
 	if (!nm.parse(msg))
 		return "can't parse loot mask";
@@ -204,8 +284,29 @@ rfx_loot::process(rfx_event *ev, pqhead_t *pre, pqhead_t *post, evqhead_t *evq)
 			ev->ignore_source();
 			return RFX_BREAK;
 		}
+	} else if (ev->what == RFXEV_WCHAT_SENT) {
+		char cmd;
+		unsigned iid, gid;
+		rfx_chat_event *e = (rfx_chat_event*)ev;
+		if (sscanf(e->msg.c_str(), "%c%x%x", &cmd, &iid, &gid) == 3 && cmd == 'x') {
+			rf_packet_t *pi = make_pick_request(gid, iid);
+			printf("[ INJECT ]"); pkt_dump(pi);
+			pqh_push(post, pi);
+			ev->ignore_source();
+			return RFX_BREAK;
+		}
 //	} else if (ev->what == RFXEV_BACKPACK_PICK) {
 		/* we were requested to pick an item */
+	} else if (ev->what == RFXEV_LOOT_PICK_DO) {
+		/* we were requested to pick item */
+		printf(lcc_RED ">>> PICK REQEST: %u" lcc_NORMAL "\n", ((rfx_pick_do_event*)ev)->gid);
+		if (!prq) {
+			pqh_push(post, pick_rq((rfx_pick_do_event*)ev));
+			prq = &pick_rq;
+		} else {
+			printf("*** warning: operation already in progress\n");
+		}
+		return RFX_BREAK;
 	}
 	return RFX_DECLINE;
 }
