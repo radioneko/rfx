@@ -87,14 +87,15 @@ struct pick_request {
 	uint16_t		gid;		/* ground_id */
 	uint16_t		iid;		/* inventory id */
 	unsigned		code;		/* optional, not always known */
-	//rf_packet_t		*rq;		/* generated pick request */
-	pick_request() /*: rq(NULL)*/ {}
+	pick_request() {}
 	~pick_request() { release(); }
 	void release() { /* if (rq) { pkt_unref(rq); rq = NULL; } */ }
 	rf_packet_t *operator()(rfx_pick_do_event *e) {
 		rf_packet_t *rq;
 		gid = e->gid; iid = e->iid; code = e->code;
 		rq = make_pick_request(gid, iid);
+		rq->delay = e->delay;
+		//printf("scheduled pick: 0x%hx => 0x%hx in %u ms\n", gid, iid, rq->delay);
 		return rq;
 	}
 	rf_packet_t* operator()() {
@@ -125,7 +126,7 @@ rfx_loot::process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_t *ev
 	case LOOT_DROP_NEW:
 		pkt->desc = "new item on the ground";
 		id = GET_INT24(pkt->data + 4);
-		pkt->show = 1;
+//		pkt->show = 1;
 		break;
 	case LOOT_DROP_HORIZON:
 		pkt->desc = "new item at the vision range";
@@ -154,7 +155,7 @@ rfx_loot::process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_t *ev
 	case ITEM_PICK:
 		/* we block all pick requests while we're in automatic pick mode */
 		pkt->desc = "item pick request";
-		pkt->show = 1;
+//		pkt->show = 1;
 		if (prq) {
 			/* drop this packet if automatic pick operation already in progress */
 			rf_packet_t *rej = pkt_new(5, PICK_RESPONSE, SRV_TO_CLI);
@@ -168,7 +169,7 @@ rfx_loot::process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_t *ev
 		if (prq && prq->iid == 0xffff) {
 			if (pkt->len >= 16 && pkt->data[4] == 0 && prq->code == GET_INT24(pkt->data + 5)) { /* len >= 16 is taken at random */
 				/* workaround for new stacks, when prq->iid is 0xffff and read iid is only given in "new item" packet */
-				printf(lcc_WHITE "*** EMITTING new stack!" lcc_NORMAL "\n");
+//				printf(lcc_WHITE "*** EMITTING new stack!" lcc_NORMAL "\n");
 				evq->push_back(new rfx_loot_pick_event(prq->gid, GET_INT16(pkt->data + 0x14), prq->code));
 				prq->release();
 				prq = NULL;
@@ -177,6 +178,7 @@ rfx_loot::process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_t *ev
 				rf_packet_t *rq = pick_rq();
 				rq->delay = 200; /* 100 ms delay */
 				pqh_push(post, rq);
+				pkt->drop = 1;
 			} else {
 				evq->push_back(new rfx_loot_pick_event(prq->gid, prq->iid, prq->code, PICK_FAILED));
 				prq->release();
@@ -187,18 +189,18 @@ rfx_loot::process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_t *ev
 		break;
 	case PICK_RESPONSE:
 		pkt->desc = "loot pick response";
-		pkt->show = 1;
+//		pkt->show = 1;
 		if (pkt->len >= 7 && pkt->data[4] == 0 && prq) {
 			/* successful pickup */
 			uint16_t iid = GET_INT16(pkt->data + 5);
 			if (prq->iid == iid) {
 				/* we've picked exactly what we were requested to */
-				printf("*** EMIT gid = 0x%x, iid = 0x%x, code = 0x%x\n", prq->gid, prq->iid, prq->code);
+//				printf("*** EMIT gid = 0x%x, iid = 0x%x, code = 0x%x\n", prq->gid, prq->iid, prq->code);
 				evq->push_back(new rfx_loot_pick_event(prq->gid, prq->iid, prq->code));
 				prq->release();
 				prq = NULL;
 			} else {
-				printf("picked 0x%x, wanted 0x%x\n", iid,  prq ? prq->iid : 0xffff);
+				printf(lcc_GRAY "picked 0x%x, wanted 0x%x" lcc_NORMAL "\n", iid,  prq ? prq->iid : 0xffff);
 				prq->release();
 				prq = NULL;
 			}
@@ -209,20 +211,18 @@ rfx_loot::process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_t *ev
 //			else {
 				/* resend packet only if it is not waiting on the queue already */
 				rq->delay = 200; /* 100 ms delay */
-				printf(lcc_YELLOW "*** resending 0x%x (refc = %u)" lcc_NORMAL, prq->gid, rq->refc);
+//				printf(lcc_YELLOW "*** resending 0x%x (refc = %u)" lcc_NORMAL, prq->gid, rq->refc);
 				//pkt_dump(rq);
 				pqh_push(post, rq);
 //			}
 			pkt->drop = 1;
-			pkt->show = 1;
+//			pkt->show = 1;
 		} else if (prq && pkt->data[4]) {
 			/* some kind of error occured */
 			evq->push_back(new rfx_loot_pick_event(prq->gid, prq->iid, prq->code, PICK_FAILED));
 			prq->release();
 			prq = NULL;
 			printf(lcc_GRAY "*** pick failure: %d" lcc_NORMAL "\n", pkt->data[4]);
-		} else {
-			printf("=======================================\nBUGGGGGGGGGGGG (prq = %p, code = %u)\n===============================\n\n", prq, pkt->data[4]);
 		}
 		break;
 	}
@@ -290,7 +290,7 @@ rfx_loot::process(rfx_event *ev, pqhead_t *pre, pqhead_t *post, evqhead_t *evq)
 		rfx_chat_event *e = (rfx_chat_event*)ev;
 		if (sscanf(e->msg.c_str(), "%c%x%x", &cmd, &iid, &gid) == 3 && cmd == 'x') {
 			rf_packet_t *pi = make_pick_request(gid, iid);
-			printf("[ INJECT ]"); pkt_dump(pi);
+//			printf("[ INJECT ]"); pkt_dump(pi);
 			pqh_push(post, pi);
 			ev->ignore_source();
 			return RFX_BREAK;
@@ -299,12 +299,12 @@ rfx_loot::process(rfx_event *ev, pqhead_t *pre, pqhead_t *post, evqhead_t *evq)
 		/* we were requested to pick an item */
 	} else if (ev->what == RFXEV_LOOT_PICK_DO) {
 		/* we were requested to pick item */
-		printf(lcc_RED ">>> PICK REQEST: %u" lcc_NORMAL "\n", ((rfx_pick_do_event*)ev)->gid);
+//		printf(lcc_RED ">>> PICK REQEST: %u" lcc_NORMAL "\n", ((rfx_pick_do_event*)ev)->gid);
 		if (!prq) {
 			pqh_push(post, pick_rq((rfx_pick_do_event*)ev));
 			prq = &pick_rq;
 		} else {
-			printf("*** warning: operation already in progress\n");
+			printf(lcc_RED "*** loot_pick_do warning: operation already in progress" lcc_NORMAL "\n");
 		}
 		return RFX_BREAK;
 	}

@@ -24,10 +24,10 @@ sendq::send(int fd)
 		rf_packet_t *pkt;
 		sv = svbuf;
 		for (pkt = pqh_head(&pq); svc < WRIVCNT && pkt; pkt = pqh_next(pkt)) {
-			if (pkt->enqueued)
+			if (pkt->enqueued) {
+				printf("================= WARNING: tried to enqueue already queued packet!\n");
 				continue;
-			if (pkt->delay)
-				printf("================= WRONG: immediate send of delayed packet!\n");
+			}
 			sv[svc].iov_base = pkt->data;
 			sv[svc].iov_len = pkt->len;
 			svc++;
@@ -66,10 +66,10 @@ sendq::send(int fd)
 			rf_packet_t *pkt;
 			sv = svbuf;
 			for (pkt = pqh_head(&pq); svc < WRIVCNT && pkt; pkt = pqh_next(pkt)) {
-				if (pkt->enqueued)
+				if (pkt->enqueued) {
+					printf("***************** WARNING: tried to enqueue already queued packet!\n");
 					continue;
-				if (pkt->delay)
-					printf("**************** WRONG: immediate send of delayed packet!\n");
+				}
 				sv[svc].iov_base = pkt->data;
 				sv[svc].iov_len = pkt->len;
 				svc++;

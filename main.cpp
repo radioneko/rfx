@@ -217,6 +217,8 @@ int main(int argc, char **argv)
 	struct ev_timer pt;
 	struct ev_loop *loop = ev_default_loop(0);
 
+	srand(time(NULL));
+
 	load_plugins("dl/rfx_chat.so", "dl/rfx_loot.so", "dl/rfx_debug.so", "dl/rfx_inventory.so", NULL);
 	if (init_addr(&bind_sa, bind_addr) != 0)
 		perror_fatal("Can't parse bind addr: `%s'", bind_addr);
@@ -487,12 +489,11 @@ struct delayed_pkt {
 	rf_packet_t					*pkt;
 	TAILQ_ENTRY(delayed_pkt)	link;
 	delayed_queue				&dq;
-	bool						fired;
 
-	delayed_pkt(delayed_queue &qh, rf_packet_t *pkt, void (*cb)(EV_P_ ev_timer *dp, int revents)) : pkt(pkt), dq(qh), fired(false) { ev_timer_init(&wait, cb, pkt->delay / 1000.0, 0.0); pkt->delayed = 1; pkt->delay = 0; wait.data = this; }
-	~delayed_pkt() { if (pkt) { pkt->delayed = 0; pkt_unref(pkt); } }
+	delayed_pkt(delayed_queue &qh, rf_packet_t *pkt, void (*cb)(EV_P_ ev_timer *dp, int revents)) : pkt(pkt), dq(qh) { ev_timer_init(&wait, cb, pkt->delay / 1000.0, 0.0); wait.data = this; }
+	~delayed_pkt() { if (pkt) { pkt_unref(pkt); } }
 
-	void start(EV_P) { if (!fired) { fired = true; printf(lcc_CYAN "[ %.4f ]" lcc_NORMAL " delayed_pkt %p started\n", ev_now(EV_A), pkt); ev_timer_start(EV_A_ &wait); } }
+	void start(EV_P) { /*printf(lcc_CYAN "[ %.4f ]" lcc_NORMAL " delayed_pkt %p started\n", ev_now(EV_A), pkt); */ ev_timer_start(EV_A_ &wait); }
 	void stop(EV_P) { ev_timer_stop(EV_A_ &wait); }
 };
 
@@ -525,17 +526,17 @@ delayed_queue::~delayed_queue()
 void
 delayed_queue::pull(pqhead_t *src)
 {
-	unsigned count = 0;
+	//unsigned count = 0;
 	rf_packet_t *pkt;
 //	printf("delayed_queue::pull BEGIN\n");
 	while ((pkt = pqh_pop(src))) {
 		delayed_pkt *dp = new delayed_pkt(*this, pkt, timeout_cb);
 		has_new = true;
 		TAILQ_INSERT_TAIL(&qh, dp, link);
-		count++;
+		//count++;
 	}
-	if (count)
-		printf(lcc_GREEN ">>> pulled in %u items" lcc_NORMAL "\n", count);
+	//if (count)
+	//	printf(lcc_GREEN ">>> pulled in %u items" lcc_NORMAL "\n", count);
 //	printf("delayed_queue::pull DONE\n");
 }
 
@@ -571,6 +572,7 @@ delayed_queue::timeout_cb(EV_P_ ev_timer *tmr, int revents)
 	delayed_pkt *dp = (delayed_pkt*)tmr->data;
 	delayed_queue *self = &dp->dq;
 
+	/*
 	unsigned count = 0;
 	delayed_pkt *tmp;
 	TAILQ_FOREACH(tmp, &self->qh, link) {
@@ -578,15 +580,18 @@ delayed_queue::timeout_cb(EV_P_ ev_timer *tmr, int revents)
 	}
 	printf(">>> delayed_queue::timeout_cb packets waiting: %u\n", count);
 	count = 0;
+	*/
 
 	ev_timer_stop(EV_A_ tmr);
-	printf(lcc_GRAY "[ %.4f ]" lcc_NORMAL " delayed_pkt %p stop\n", ev_now(EV_A), dp->pkt);
+	//printf(lcc_GRAY "[ %.4f ]" lcc_NORMAL " delayed_pkt %p stop\n", ev_now(EV_A), dp->pkt);
 	TAILQ_REMOVE(&self->qh, dp, link);
 	self->emit(EV_A_ dp->pkt);
+	/*
 	TAILQ_FOREACH(tmp, &self->qh, link) {
 		count++;
 	}
 	printf("<<< delayed_queue::timeout_cb packets left: %u\n", count);
+	*/
 	delete dp;
 }
 
@@ -636,7 +641,6 @@ rf_delayed_queue::emit(EV_P_ rf_packet_t *pkt)
 {
 	if (pkt) {
 		proxy_pipe &p =  pkt->dir == SRV_TO_CLI ? session.s2c : session.c2s;
-		pkt->delayed = 0;
 		pkt_ref(pkt);
 		p.push_out(pkt);
 		p.handle_write_event(EV_A);

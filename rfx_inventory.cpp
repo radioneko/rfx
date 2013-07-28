@@ -2,6 +2,7 @@
 #include "rfx_modules.h"
 #include "cconsole.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <map>
 
 #define	LOOT_DROP_NEW		0x1403
@@ -38,6 +39,7 @@ public:
 	bool new_item(uint16_t iid, unsigned code, unsigned count);
 	bool bind(uint16_t iid, uint8_t cell);
 	bool remove(uint16_t iid);
+	unsigned clear(unsigned code);
 
 	int alloc_iid(unsigned code);
 
@@ -49,6 +51,28 @@ public:
 };
 
 /* backpack implementation {{{ */
+
+/* remove items with specified ids from inventory and from new_items */
+unsigned
+backpack::clear(unsigned code)
+{
+	unsigned count = 0;
+	for (iid_map_t::iterator i = new_items.begin(), next = i; i != new_items.end(); i = next) {
+		++next;
+		if (i->second.code == code) {
+			new_items.erase(i);
+			count++;
+		}
+	}
+	for (unsigned idx = 0; idx < sizeof(items) / sizeof(*items); idx++) {
+		backpack_item *ii = items + idx;
+		if (ii->iid != EMPTY_CELL && ii->code == code) {
+			ii->iid = EMPTY_CELL;
+			count++;
+		}
+	}
+	return count;
+}
 
 /* lookup inventory item id for specified code.
  * returns -1 on failure, 0xffff = item needs to be placed to new cell */
@@ -89,7 +113,7 @@ backpack::new_item(uint16_t iid, unsigned code, unsigned count)
 bool
 backpack::bind(uint16_t iid, uint8_t cell)
 {
-	printf("bind 0x%x => %u\n", iid, cell);
+	//printf("bind 0x%x => %u\n", iid, cell);
 	if (cell > 99)
 		return false;
 	iid_map_t::iterator i = new_items.find(iid);
@@ -217,15 +241,20 @@ struct ground_item {
 typedef std::map<uint16_t, ground_item> ground_loot_t;
 /* FIFO queue of ground items to pick */
 class pick_queue {
-	bool						running;
-	ground_loot_t				loot;
-	TAILQ_HEAD(,ground_item)	gq;
 public:
-	pick_queue() : running(false) { TAILQ_INIT(&gq); }
+	enum {FIFO, STACK, RANDOM};
+private:
+	ground_item						*active;
+	ground_loot_t					loot;
+	TAILQ_HEAD(gq_t,ground_item)	gq;
+public:
+	int								pick_mode;
+	pick_queue() : active(NULL), pick_mode(FIFO)  { TAILQ_INIT(&gq); }
 	/* enqueue item to pick */
 	void enqueue(uint16_t gid, unsigned code);
 	bool pick_top(uint16_t &gid, unsigned &code);
 	void remove(uint16_t gid);
+	void set_mode(int mode) { pick_mode = mode; }
 };
 
 /* pick_queue implementation {{{ */
@@ -246,12 +275,29 @@ pick_queue::enqueue(uint16_t gid, unsigned code)
 bool
 pick_queue::pick_top(uint16_t &gid, unsigned &code)
 {
-	if (running || TAILQ_EMPTY(&gq))
+	if (active || TAILQ_EMPTY(&gq))
 		return false;
-	ground_item *gi = TAILQ_FIRST(&gq);
+	ground_item *gi;
+	if (pick_mode == FIFO)
+		gi = TAILQ_FIRST(&gq);
+	else if (pick_mode == STACK)
+		gi = TAILQ_LAST(&gq, gq_t);
+	else {
+		unsigned count = 0;
+		/* pick random item */
+		TAILQ_FOREACH(gi, &gq, link) {
+			count++;
+		}
+		count = random() % count;
+		TAILQ_FOREACH(gi, &gq, link) {
+			if (!count)
+				break;
+			count--;
+		}
+	}
 	gid = gi->gid;
 	code = gi->code;
-	running = true;
+	active = gi;
 	return true;
 }
 
@@ -260,9 +306,9 @@ pick_queue::remove(uint16_t gid)
 {
 	ground_loot_t::iterator gi = loot.find(gid);
 	if (gi != loot.end()) {
-		if (&gi->second == TAILQ_FIRST(&gq)) {
-			printf("note: ready triggered\n");
-			running = false;
+		if (&gi->second == active) {
+			//printf("note: ready triggered\n");
+			active = NULL;
 		}
 		TAILQ_REMOVE(&gq, &gi->second, link);
 		loot.erase(gi);
@@ -274,15 +320,16 @@ class rfx_inventory : public rfx_filter {
 	backpack		inv;
 	pick_queue		pq;
 	bool			autopick;
-	bool schedule_pick(evqhead_t *evq);
+	bool			schedule_pick(evqhead_t *evq);
+	std::string		handle_iq(const std::string &msg, evqhead_t *evq);
 public:
 	rfx_inventory() : autopick(false) {}
 
 	int process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_t *evq);
 	int process(rfx_event *ev, pqhead_t *pre, pqhead_t *post, evqhead_t *evq);
 
-	void save_state(rfx_state *s) { inv.save(s); }
-	bool load_state(rfx_state *s) { return inv.load(s); }
+	void save_state(rfx_state *s) { sdw(s, autopick); sdw(s, pq.pick_mode); inv.save(s); }
+	bool load_state(rfx_state *s) { sdr(s, autopick); sdr(s, pq.pick_mode); return inv.load(s); }
 };
 
 int
@@ -291,7 +338,7 @@ rfx_inventory::process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_
 	switch (pkt->type) {
 	case 0x0603:
 		{
-			pkt->show = 1;
+//			pkt->show = 1;
 			pkt->desc = "inventory list packet";
 			inv.reset();
 			for (unsigned i = 4; i + 21 <= pkt->len; i += 21) {
@@ -304,22 +351,23 @@ rfx_inventory::process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_
 	case 0x0407:
 		if (pkt->len == 8) {
 			/* successful pickup */
-			pkt->show = 1;
+//			pkt->show = 1;
 			pkt->desc = "inventory item update";
 			inv.update_count(GET_INT16(pkt->data + 5), pkt->data[7]);
 		}
 		break;
 	case 0x0307:
-		pkt->show = 1;
+//		pkt->show = 1;
 		pkt->desc = "new item in inventory";
 		if (pkt->data[4] == 0) {
+			printf(lcc_YELLOW "+++++ inventory: new item\n");
 			inv.new_item(GET_INT16(pkt->data + 0x14) /* iid */,
 					GET_INT24(pkt->data + 5) /* code */,
 					GET_INT16(pkt->data + 8) /* count */);
 		}
 		break;
 	case 0x100d:
-		pkt->show = 1;
+//		pkt->show = 1;
 		pkt->desc = "inventory bind";
 		if (pkt->data[5] == 0) {
 			unsigned n = pkt->data[4]; // data[5] is something like "slot"
@@ -332,7 +380,7 @@ rfx_inventory::process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_
 		}
 		break;
 	case 0x1707:
-		pkt->show = 1;
+//		pkt->show = 1;
 		pkt->desc = "item disappear from inventory (srv notify)";
 		if (pkt->data[4] == 0)
 			if (!inv.remove(GET_INT16(pkt->data + 5) /* iid */))
@@ -380,11 +428,43 @@ rfx_inventory::schedule_pick(evqhead_t *evq)
 	uint16_t gid;
 	unsigned code;
 	if (autopick && pq.pick_top(gid, code) && (iid = inv.alloc_iid(code)) != -1) {
-		printf(lcc_GREEN "*** enqueued picking 0x%x to 0x%x" lcc_NORMAL "\n", gid, iid);
-		evq->push_back(new rfx_pick_do_event(gid, iid, code));
+//		printf(lcc_GREEN "*** enqueued picking 0x%x to 0x%x" lcc_NORMAL "\n", gid, iid);
+		evq->push_back(new rfx_pick_do_event(gid, iid, code, iid == 0xffff ? 3000 : 0));
 		return true;
 	}
 	return false;
+}
+
+std::string
+rfx_inventory::handle_iq(const std::string &msg, evqhead_t *evq)
+{
+	if (msg == "on") {
+		autopick = true;
+		schedule_pick(evq);
+		return "autopick enabled";
+	} else if (msg == "off") {
+		autopick = false;
+		return "autopick disabled";
+	} else if (msg == "rnd") {
+		pq.set_mode(pick_queue::RANDOM);
+		return "randomizing loot pickups";
+	} else if (msg == "seq") {
+		pq.set_mode(pick_queue::FIFO);
+		return "sequental loot pickup";
+	} else if (msg == "inv") {
+		pq.set_mode(pick_queue::STACK);
+		return "inverted loot pickup";
+	} else if (msg.size() > 3 && msg.compare(0, 1, "-") == 0 && isxdigit(msg[1])) {
+		char reply[64];
+		int code = h2i(msg.c_str() + 1);
+		sprintf(reply, "%u items with code 0x%x removed", inv.clear(code), code);
+		return reply;
+	} else {
+		int filter = msg.empty() ? -1 : h2i(msg.c_str());
+		inv.dump(filter);
+		return "inventory dumped to stdout";
+	}
+	return "invalid syntax";
 }
 
 int
@@ -402,28 +482,20 @@ rfx_inventory::process(rfx_event *ev, pqhead_t *pre, pqhead_t *post, evqhead_t *
 	} else if (ev->what == RFXEV_PRIV_SENT) {
 		rfx_chat_event *e = (rfx_chat_event*)ev;
 		if (e->nick == "iq") {
-			if (e->msg == "on") {
-				autopick = true;
-				schedule_pick(evq);
-			} else if (e->msg == "off")
-				autopick = false;
-			else {
-				int filter = e->msg.empty() ? -1 : h2i(e->msg.c_str());
-				inv.dump(filter);
-			}
+			evq->push_back(new rfx_chat_event(RFXEV_SEND_REPLY, e->nick, handle_iq(e->msg, evq), NULL));
 			e->ignore_source();
 			return RFX_BREAK;
 		}
 	} else if (ev->what == RFXEV_LOOT_APPEAR) {
 		/* new item on the ground */
 		rfx_loot_event *e = (rfx_loot_event*)ev;
-		if (e->code == 0x1614) {
+		if (e->code == 0x1614 || e->code == 0x1714) { /* gli and beam */
 			pq.enqueue(e->gid, e->code);
 			schedule_pick(evq);
 		}
 	} else if (ev->what == RFXEV_LOOT_DISAPPEAR) {
 		rfx_loot_event *e = (rfx_loot_event*)ev;
-		printf("*remove loot 0x%x\n", e->gid);
+//		printf("*remove loot 0x%x\n", e->gid);
 		pq.remove(e->gid);
 	} else if (ev->what == RFXEV_LOOT_PICK) {
 		rfx_loot_pick_event *e = (rfx_loot_pick_event*)ev;

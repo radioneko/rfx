@@ -58,7 +58,8 @@ struct rfx_pick_do_event : public rfx_event {
 	uint16_t			gid;		/* gorund id */
 	uint16_t			iid;		/* inventory id */
 	unsigned			code;		/* item hex code */
-	rfx_pick_do_event(uint16_t gid, uint16_t iid, unsigned code) : rfx_event(RFXEV_LOOT_PICK_DO, NULL), gid(gid), iid(iid), code(code) {}
+	unsigned			delay;		/* desired delay in generated packet */
+	rfx_pick_do_event(uint16_t gid, uint16_t iid, unsigned code, unsigned delay = 0) : rfx_event(RFXEV_LOOT_PICK_DO, NULL), gid(gid), iid(iid), code(code), delay(delay) {}
 };
 
 enum {

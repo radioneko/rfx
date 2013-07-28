@@ -16,7 +16,6 @@ typedef struct rf_packet {
 	uint8_t					dir:2;
 	uint8_t					drop:1;			/* packet should be dropped */
 	uint8_t					show:1;			/* packet hex dump will be displayed */
-	uint8_t					delayed:1;		/* packet is in the "delayed sending" state */
 	uint8_t					enqueued:1;		/* packet is being send */
 	unsigned				refc;
 	unsigned				delay;			/* delay before this packet sending (in milliseconds) */
