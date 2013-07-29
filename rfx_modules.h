@@ -16,6 +16,7 @@ enum {
 	RFXEV_LOOT_DISAPPEAR,
 	RFXEV_LOOT_PICK_DO,
 	RFXEV_LOOT_PICK,
+	RFXEV_LOOT_PICK_RESET,
 	RFXEV_LAST
 };
 
@@ -65,6 +66,7 @@ struct rfx_pick_do_event : public rfx_event {
 enum {
 	PICK_SUCCESS	= 0,
 	PICK_FULL		= 3,	/* can't add more items to stack/inventory */
+	PICK_NORIGHT	= 5,	/* the item is owned by another player */
 	PICK_TOOFAR		= 6,	/* item is too far away */
 	PICK_FAILED		= 127
 };
@@ -76,7 +78,7 @@ struct rfx_loot_pick_event : public rfx_event {
 	unsigned			code;
 	uint8_t				result;
 	/* successful pickup */
-	rfx_loot_pick_event(uint16_t gid, uint16_t iid, unsigned code, uint8_t result = PICK_SUCCESS) : rfx_event(RFXEV_LOOT_PICK, NULL), gid(gid), iid(iid), code(code), result(result) {}
+	rfx_loot_pick_event(uint16_t gid, uint16_t iid, unsigned code, uint8_t result = PICK_SUCCESS, rf_packet_t *pkt = NULL) : rfx_event(RFXEV_LOOT_PICK, pkt), gid(gid), iid(iid), code(code), result(result) {}
 	rfx_loot_pick_event(uint8_t result) : rfx_event(RFXEV_LOOT_PICK, NULL), gid(-1), iid(-1), code(-1), result(result) {}
 };
 

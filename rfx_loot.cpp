@@ -307,6 +307,11 @@ rfx_loot::process(rfx_event *ev, pqhead_t *pre, pqhead_t *post, evqhead_t *evq)
 			printf(lcc_RED "*** loot_pick_do warning: operation already in progress" lcc_NORMAL "\n");
 		}
 		return RFX_BREAK;
+	} else if (ev->what == RFXEV_LOOT_PICK_RESET) {
+		if (prq) {
+			prq->release();
+			prq = NULL;
+		}
 	}
 	return RFX_DECLINE;
 }

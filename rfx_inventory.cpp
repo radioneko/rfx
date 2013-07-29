@@ -284,6 +284,7 @@ public:
 	bool pick_top(uint16_t &gid, unsigned &code);
 	void remove(uint16_t gid);
 	void set_mode(int mode) { pick_mode = mode; }
+	void reset() { TAILQ_INIT(&gq); loot.clear(); active = NULL; }
 };
 
 /* pick_queue implementation {{{ */
@@ -491,6 +492,10 @@ rfx_inventory::handle_iq(const std::string &msg, evqhead_t *evq)
 		char reply[64];
 		sprintf(reply, "total cost: %.2fkk", inv.cost() / 1000000.0);
 		return reply;
+	} else if (msg == "reset") {
+		pq.reset();
+		evq->push_back(new rfx_event(RFXEV_LOOT_PICK_RESET, NULL));
+		return "reset autopicker list";
 	} else if (msg.size() > 3 && msg.compare(0, 1, "-") == 0 && isxdigit(msg[1])) {
 		char reply[64];
 		int code = h2i(msg.c_str() + 1);
