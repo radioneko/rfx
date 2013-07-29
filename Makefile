@@ -12,10 +12,10 @@ all: proxy libutil.a $(DLDIR)/rfx_chat.so $(DLDIR)/rfx_loot.so $(DLDIR)/rfx_debu
 
 proxy: $(OBJDIR)/main.o $(OBJDIR)/proxy.o $(OBJDIR)/evq.o \
        $(OBJDIR)/pktq.o api_version.c libutil.a
-	$(CXX) -o $@ $^ -lev -ldl
+	$(CXX) -o $@ $^ -lev -ldl -lrt
 
 $(DLDIR)/%.so: $(OBJDIR)/pic_%.o api_version.c librfxmod.a
-	$(CXX) -shared -fPIC -DPIC -o $@ $^
+	$(CXX) -shared -fPIC -DPIC -o $@ $^ -lrt
 
 ifeq ($(filter dep clean,$(MAKECMDGOALS)),)
 .dep: dep

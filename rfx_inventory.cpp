@@ -1,6 +1,7 @@
 #include "rfx_api.h"
 #include "rfx_modules.h"
 #include "cconsole.h"
+#include "util.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -350,10 +351,10 @@ class rfx_inventory : public rfx_filter {
 	bool			autopick;
 	bool			schedule_pick(evqhead_t *evq);
 	uint64_t		c_margin;
-	time_t			c_tstamp;
+	timespec		c_tstamp;
 	std::string		handle_iq(const std::string &msg, evqhead_t *evq);
 public:
-	rfx_inventory() : autopick(false), c_margin(0), c_tstamp(time(NULL)) {}
+	rfx_inventory() : autopick(false), c_margin(0) { clock_gettime(CLOCK_MONOTONIC, &c_tstamp); }
 
 	int process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_t *evq);
 	int process(rfx_event *ev, pqhead_t *pre, pqhead_t *post, evqhead_t *evq);
@@ -377,7 +378,7 @@ rfx_inventory::process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_
 				inv.put(ii);
 			}
 			c_margin = inv.cost();
-			c_tstamp = time(NULL);
+			clock_gettime(CLOCK_MONOTONIC, &c_tstamp);
 		}
 		break;
 	case 0x0407:
@@ -494,7 +495,7 @@ rfx_inventory::handle_iq(const std::string &msg, evqhead_t *evq)
 		char reply[64];
 		int code = h2i(msg.c_str() + 1);
 		sprintf(reply, "%u items with code 0x%x removed", inv.clear(code), code);
-		c_tstamp = time(NULL);
+		clock_gettime(CLOCK_MONOTONIC, &c_tstamp);
 		c_margin = inv.cost();
 		return reply;
 	} else {
@@ -538,17 +539,21 @@ rfx_inventory::process(rfx_event *ev, pqhead_t *pre, pqhead_t *post, evqhead_t *
 	} else if (ev->what == RFXEV_LOOT_PICK) {
 		uint64_t cost = inv.cost();
 		rfx_loot_pick_event *e = (rfx_loot_pick_event*)ev;
+		//if (e->result == PICK_NORIGHT || e->result == PICK_TOOFAR)
+		//	e->drop_source();
 		pq.remove(e->gid);
 		if (cost >= c_margin + M_STEP) {
 			char ntfy[128];
-			time_t now = time(NULL);
-			double avg;
-			if (now != c_tstamp)
-				avg = (double)(cost - c_margin) / (now - c_tstamp) / 1000000.0 * 60.0;
+			timespec now;
+			double avg, dt;
+			clock_gettime(CLOCK_MONOTONIC, &now);
+			dt = clock_diff(&c_tstamp, & now) / 1000000.0;
+			if (dt > 0)
+				avg = (double)(cost - c_margin) / dt / 1000000.0 * 60.0;
 			else
 				avg = 9999.99;
-			snprintf(ntfy, sizeof(ntfy), "cost %.2fkk in %u sec, %.3fkk/min",
-					cost / 1000000.0, (unsigned)(now - c_tstamp), avg);
+			snprintf(ntfy, sizeof(ntfy), "cost %.2fkk, %.3fkk/min (1kk in %.2f sec)",
+					cost / 1000000.0, avg, dt);
 			evq->push_back(new rfx_chat_event(RFXEV_SEND_REPLY, "iq", ntfy, NULL));
 
 			c_tstamp = now;
