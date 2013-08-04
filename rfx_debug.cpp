@@ -48,7 +48,7 @@ find_int16(rf_packet_t *pkt, unsigned what)
 int
 rfx_debug::process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_t *evq)
 {
-#if 0
+#if 1
 	switch (pkt->type) {
 	case 0x1304: // cli -> srv: move
 	case 0x0104: // cli -> srv: move?
@@ -67,7 +67,17 @@ rfx_debug::process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_t *e
 	case 0x970b:
 	case 0x0b04:
 	case 0x0107:
+		/* dig */
+	//case 0x10e: // client: dig request (data[5] = 0x11 to dig ore+4)
+	case 0x020e: // server: dig started
+	case 0x060e: // server: dig result
 		pkt->show = 0;
+		break;
+	case 0x10e: /* digging */
+		if (dbg_show) {
+			//pkt->show = dbg_show;
+			pkt->data[5] = 0x11;
+		}
 		break;
 	default:
 		pkt->show = dbg_show;

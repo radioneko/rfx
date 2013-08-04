@@ -7,16 +7,66 @@
 #include <stdlib.h>
 #include <map>
 
+
+static bool auto_farm(unsigned code)
+{
+	switch (code) {
+	case 0x1614:
+	case 0x1714:
+	//case 0x29408:	// 25/20 atk dodge acc ring
+		return true;
+	}
+	return false;
+}
+
+static bool ore[3] = {false, true, true};
+
+static bool auto_ore(unsigned code)
+{
+	switch (code) {
+	/* Ore +3 {{{ */
+	case 0x0311:
+	case 0x0911:
+	case 0x0011:
+	case 0x0611:
+	case 0x0c11:
+	/* }}} */
+		return ore[2];
+	/* Ore +2 {{{ */
+	case 0x0411:
+	case 0x0a11:
+	case 0x0111:
+	case 0x0711:
+	case 0x0d11:
+	/* }}} */
+		return ore[1];
+	/* Ore +1 {{{ */
+	case 0x0511:
+	case 0x0b11:
+	case 0x0211:
+	case 0x0811:
+	case 0x0e11:
+	/* }}} */
+		return ore[0];
+	}
+	return false;
+}
+
 static unsigned get_cost(unsigned code)
 {
 	switch (code) {
 	case 0x1614:		return 21576;
 	case 0x1714:		return 24185; /* TODO */
-	default:			return 0;
+	default:			return auto_ore(code) ? 1 : 0;
 	}
 }
 
-#define M_STEP 1000000
+static bool auto_loot(unsigned code)
+{
+	return auto_farm(code);
+}
+
+#define M_STEP 100000
 
 #define	LOOT_DROP_NEW		0x1403
 #define	LOOT_DROP_HORIZON	0x0f04
@@ -462,8 +512,8 @@ rfx_inventory::schedule_pick(evqhead_t *evq)
 	uint16_t gid;
 	unsigned code;
 	if (autopick && pq.pick_top(gid, code) && (iid = inv.alloc_iid(code)) != -1) {
-//		printf(lcc_GREEN "*** enqueued picking 0x%x to 0x%x" lcc_NORMAL "\n", gid, iid);
-		evq->push_back(new rfx_pick_do_event(gid, iid, code, iid == 0xffff ? 3000 : 0));
+		//printf(lcc_GREEN "*** enqueued picking 0x%x to 0x%x" lcc_NORMAL "\n", gid, iid);
+		evq->push_back(new rfx_pick_do_event(gid, iid, code, iid == 0xffff ? 1000 : 0));
 		return true;
 	}
 	return false;
@@ -533,7 +583,7 @@ rfx_inventory::process(rfx_event *ev, pqhead_t *pre, pqhead_t *post, evqhead_t *
 	} else if (ev->what == RFXEV_LOOT_APPEAR) {
 		/* new item on the ground */
 		rfx_loot_event *e = (rfx_loot_event*)ev;
-		if (e->code == 0x1614 || e->code == 0x1714) { /* gli and beam */
+		if (auto_loot(e->code)) { /* gli and beam */
 			pq.enqueue(e->gid, e->code);
 			schedule_pick(evq);
 		}
