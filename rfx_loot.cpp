@@ -188,8 +188,8 @@ dumb_test_good(int code)
 	case 0x441F: //relic box
 	case 0x451F: //relic box
 	case 0x461F: //relic box
-	//case 0x174403: //	53 in laucher boots
-	//case 0x174303: // ?? test_items says this is actual boots identifier
+	case 0x174403: //	53 in laucher boots
+	case 0x174303: // ?? test_items says this is actual boots identifier
 		return true;
 	}
 	return false;
