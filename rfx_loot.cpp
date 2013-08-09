@@ -191,6 +191,17 @@ dumb_test_good(int code)
 	case 0x174403: //	53 in laucher boots
 	case 0x174303: // ?? test_items says this is actual boots identifier
 		return true;
+	/* lucky boxes */
+	case 0xB71F: //small
+	case 0xB81F: //mid
+	case 0xB91F: //big
+	case 0xBA1F: //relic box
+	case 0xBB1F: //relic box
+	case 0xBC1F: //relic box
+	case 0xBD1F: //relic box
+	case 0xBE1F: //relic box
+	case 0xBF1F: //relic box
+		return true;
 	}
 	return false;
 }
