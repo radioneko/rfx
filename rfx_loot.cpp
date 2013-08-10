@@ -125,34 +125,13 @@ dumb_test_good(int code)
 {
 	switch (code) {
 	/* HP/FP 25 */
-	case 0x25E08: //	iiaaa95
-	case 0x25F08: //	iiaaa96
-	case 0x26008: //	iiaaa97
-	case 0x26108: //	iiaaa98
-	case 0x26C08: //	iiaab10
-	case 0x26D08: //	iiaab11
-	case 0x26E08: //	iiaab12
-	case 0x26F08: //	iiaab13
+#include "cdata/hp-fp.h"
 		return false;
 	/* ATK-DODGE */
-	case 0x29108: //	iiaab47	ring 20/15
-	case 0x29208: //	iiaab48	ring 20/15
-	case 0x29308: //	iiaab49	ring 20/15
-	case 0x29408: //	iiaab50	ring 25/20
-	case 0x29109: //	iaaab47	amulet 20/15
-	case 0x29209: //	iaaab48	amulet 20/15
-	case 0x29309: //	iaaab49	amulet 20/15
-	case 0x29409: //	iaaab50	amulet 25/20
+#include "cdata/atk-dodge.h"
 		return true;
 	/* ATK-DEF */
-	case 0x29908: //	iiaab55	ring 20/20
-	case 0x29A08: //	iiaab56	ring 20/20
-	case 0x29B08: //	iiaab57	ring 20/20
-	case 0x29C08: //	iiaab58	ring 25/25
-	case 0x29909: //	iaaab55	amulet 20/20
-	case 0x29A09: //	iaaab56	amulet 20/20
-	case 0x29B09: //	iaaab57	amulet 20/20
-	case 0x29C09: //	iaaab58	amulet 25/25
+#include "cdata/atk-def.h"
 		return true;
 	/* DEF-DODGE */
 	case 0x2AC08: //	iiaab74 ring 25/20
@@ -160,26 +139,27 @@ dumb_test_good(int code)
 	/* PB related items */
 	case 0x2412: // t3 ruby
 	case 0x2712: // t3 brilliant
-	case 0x2a12: // t3 topaz	
+	case 0x2a12: // t3 topaz
 	case 0x2d12: // t3 obsidian
 	case 0x4412: // t5 ruby
 	case 0x4512: // t5 brilliant
-	case 0x4612: // t5 topaz	
+	case 0x4612: // t5 topaz
 	case 0x4712: // t5 obsidian
 	case 0x1412: // ignore
-	case 0x2012: // mercy	
+	case 0x2012: // mercy
 	case 0x1200d: // rescue rune
 	case 0x1210d: // defence rune
 	case 0x2112: // restoration tallic
 	case 0x1912: // favor tallic
 		return true;
 	/* 50 int weapons */
-	case 0xC506:  //	iwknb50 one-handed sword
-	case 0x18D06: //	iwswb50 two-handed sword
-	case 0x4AD06: //	iwspb50 spear	
-	/* 50 int weapons */
-	case 0x213506: //	one-handed sword	
-	case 0x213D06: //	spear
+	//case 0xC506:  //	iwknb50 one-handed sword
+	//case 0x18D06: //	iwswb50 two-handed sword
+	//case 0x4AD06: //	iwspb50 spear
+	/* 55 int weapons */
+	//case 0x213506: //	one-handed sword
+	//case 0x213D06: //	spear
+#include "cdata/55int.h"
 		return true;
 	/* misc stuff */
 	case 0x42509: //dagom amulet
