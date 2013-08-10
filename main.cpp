@@ -15,6 +15,9 @@
 #include "rfx_api.h"
 #include <vector>
 #include <sys/stat.h>
+#include <map>
+#include <langinfo.h>
+#include <iconv.h>
 
 static const char
 	*bind_addr = "0.0.0.0:2345",
@@ -213,6 +216,101 @@ plugins_check_cb(EV_P_ ev_timer *t, int revents)
 	ev_timer_again(EV_A_ t);
 }
 
+/* rfx_globals - global state {{{ */
+struct rfx_data : public rfx_globals {
+private:
+	iconv_t ccv;
+	typedef std::map<unsigned,std::string>	item_data_t;
+	item_data_t items;
+	void load_items();
+	void init_locale();
+public:
+	rfx_data();
+	~rfx_data() {}
+
+	virtual const char* item_name(unsigned code);
+	virtual std::string item_name_loc(unsigned code);
+};
+
+void
+rfx_data::load_items()
+{
+	FILE *in = fopen("item.csv", "r");
+	if (in) {
+		char line[4096];
+		while ((fgets(line, sizeof(line), in))) {
+			if (line[0] == '0' && line[1] == 'x') {
+				char *l, *n;
+				unsigned code = 0;
+				/* extract item code */
+				for (l = line + 2; isxdigit(*l); l++)
+					code = (code << 4) | xdigit2i(*l);
+				if (*l != ';')
+					continue;
+				/* skip to item name */
+				l = strchr(l + 1, ';');
+				if (!l)
+					continue;
+				n = ++l;
+				while (*l & ~0x1f)
+					l++;
+				*l = 0;
+				items[code] = n;
+			}
+		}
+		fclose(in);
+	}
+}
+
+void
+rfx_data::init_locale()
+{
+	char l_to[128];
+	setlocale(LC_ALL, "");
+	snprintf(l_to, sizeof(l_to), "%s//IGNORE", nl_langinfo(CODESET));
+	ccv = iconv_open(l_to, "CP1251");
+}
+
+/* Try to load items.csv */
+rfx_data::rfx_data()
+{
+	load_items();
+	init_locale();
+}
+
+const char*
+rfx_data::item_name(unsigned code)
+{
+	item_data_t::const_iterator i = items.find(code);
+	if (i != items.end())
+		return i->second.c_str();
+	return "";
+}
+
+/* */
+std::string
+rfx_data::item_name_loc(unsigned code)
+{
+	item_data_t::const_iterator i = items.find(code);
+	if (i != items.end()) {
+		const char *n = i->second.c_str();
+		if (ccv != (iconv_t)-1) {
+			char desc[1024], *in = (char*)n, *out = desc;
+			size_t is = strlen(n), os = sizeof(desc);
+			iconv(ccv, NULL, NULL, NULL, NULL); // reset iconv state
+			iconv(ccv, &in, &is, &out, &os);
+			*out = 0;
+			return desc;
+		}
+		return n;
+	}
+	return "";
+}
+/* }}} */
+
+/* some global data */
+static rfx_globals *Data;
+
 int main(int argc, char **argv)
 {
 	int sock;
@@ -223,6 +321,7 @@ int main(int argc, char **argv)
 
 	srand(time(NULL));
 
+	Data = new rfx_data();
 	load_plugins("dl/rfx_chat.so", "dl/rfx_loot.so", "dl/rfx_debug.so", "dl/rfx_inventory.so", NULL);
 	if (init_addr(&bind_sa, bind_addr) != 0)
 		perror_fatal("Can't parse bind addr: `%s'", bind_addr);
@@ -350,7 +449,7 @@ rfx_filter_chain::add_filter(rfx_instance *rfi)
 rfx_instance*
 rfx_module::new_instance()
 {
-	rfx_filter *f = filter_new ? filter_new() : NULL;
+	rfx_filter *f = filter_new ? filter_new(Data) : NULL;
 	rfx_instance *rfi = new rfx_instance(f, this);
 	TAILQ_INSERT_TAIL(&ih, rfi, ilink);
 	return rfi;
@@ -421,7 +520,7 @@ rfx_module::reload()
 
 	/* recreate filters */
 	TAILQ_FOREACH(i, &ih, ilink) {
-		i->flt = filter_new();
+		i->flt = filter_new(Data);
 		if (i->st) {
 			i->flt->load_state(i->st);
 			delete i->st;

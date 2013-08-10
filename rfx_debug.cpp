@@ -245,7 +245,7 @@ rfx_debug::process(rfx_event *ev, pqhead_t *pre, pqhead_t *post, evqhead_t *evq)
 	return RFX_DECLINE;
 }
 
-extern "C" rfx_filter *API_FILTER_ID()
+extern "C" rfx_filter *API_FILTER_ID(API_FILTER_ARGS)
 {
 	return new rfx_debug();
 }

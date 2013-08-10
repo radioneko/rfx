@@ -27,6 +27,8 @@ struct refptr {
 };
 #endif
 
+static rfx_globals *G;
+
 
 /* ground drop set {{{ */
 struct ground_item {
@@ -223,7 +225,11 @@ static bool
 dumb_test(int code)
 {
 	if (dumb_test_good(code)) {
-		printf(lcc_PURPLE "* Item 0x%x on the ground!" lcc_NORMAL "\n", code);
+		std::string desc = G->item_name_loc(code);
+		printf(lcc_PURPLE "* Item 0x%x on the ground!", code);
+		if (!desc.empty())
+			printf(" (%s)", desc.c_str());
+		puts(lcc_NORMAL);
 		return true;
 	} else {
 		return false;
@@ -428,7 +434,8 @@ rfx_loot::process(rfx_event *ev, pqhead_t *pre, pqhead_t *post, evqhead_t *evq)
 	return RFX_DECLINE;
 }
 
-extern "C" rfx_filter *API_FILTER_ID()
+extern "C" rfx_filter *API_FILTER_ID(API_FILTER_ARGS)
 {
+	G = data;
 	return new rfx_loot();
 }

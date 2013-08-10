@@ -8,6 +8,8 @@
 #include <map>
 
 
+static rfx_globals *G;
+
 static bool auto_farm(unsigned code)
 {
 	switch (code) {
@@ -302,9 +304,9 @@ backpack::dump(int filter)
 		count++;
 		if (filter != -1 && (int)bi->code != filter)
 			continue;
-		printf("    (%u %u %u) => 0x%02x | 0x%04x x %u\n",
+		printf("    (%u %u %u) => 0x%02x | 0x%04x x %u (%s)\n",
 				bi->cell / 20 + 1, (bi->cell % 20) / 5 + 1, (bi->cell % 5) + 1,
-				bi->iid, bi->code, bi->count);
+				bi->iid, bi->code, bi->count, G->item_name_loc(bi->code).c_str());
 	}
 	printf("====== %u items\n", count);
 }
@@ -619,7 +621,8 @@ rfx_inventory::process(rfx_event *ev, pqhead_t *pre, pqhead_t *post, evqhead_t *
 	return RFX_DECLINE;
 }
 
-extern "C" rfx_filter *API_FILTER_ID()
+extern "C" rfx_filter *API_FILTER_ID(API_FILTER_ARGS)
 {
+	G = data;
 	return new rfx_inventory();
 }

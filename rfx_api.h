@@ -4,9 +4,11 @@
 #include <stdint.h>
 #include <vector>
 #include <string.h>
+#include <string>
 
 #define		API_SIGNATURE_SYM		"rfx_api_ver"
 #define		API_FILTER_ID			rfx_filter_new
+#define		API_FILTER_ARGS			rfx_globals *data
 #define		API_FILTER_SYM			"rfx_filter_new"
 
 extern "C" const char rfx_api_ver[];
@@ -41,6 +43,16 @@ struct rfx_state {
 	}
 };
 
+struct rfx_globals {
+public:
+	virtual ~rfx_globals() {}
+
+	/* return item name in native game encoding (cp1251) */
+	virtual const char* item_name(unsigned code) = 0;
+	/* return item name in locale encoding */
+	virtual std::string item_name_loc(unsigned code) = 0;
+};
+
 class rfx_filter {
 public:
 	virtual ~rfx_filter() {}
@@ -53,5 +65,5 @@ public:
 	virtual bool load_state(rfx_state *) = 0;
 };
 
-typedef rfx_filter* (*rfx_filter_proc)();
-extern "C" rfx_filter *API_FILTER_ID();
+typedef rfx_filter* (*rfx_filter_proc)(rfx_globals *rdata);
+extern "C" rfx_filter *API_FILTER_ID(API_FILTER_ARGS);
