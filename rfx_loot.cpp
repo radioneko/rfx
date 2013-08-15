@@ -192,13 +192,30 @@ static bool
 dumb_test_bad(int code)
 {
 	switch (code) {
-	case 0x011e: // exp restoration 30-70%
-	// 55 int topor 0x213906
-	case 0x5112: // blue pudra
-	case 0x16914: // rare ore
-		return false;
+	case 0x011E:    //Восстанавливающая Капсула B()
+	case 0x5112:    //Синяя пудра
+	case 0x16914:   //Редкая руда(1)
+	case 0x0E11:    //Черная Руда+1
+	case 0x0211:    //Синяя Руда+1
+	case 0x0B11:    //Зеленая Руда+1
+	case 0x0511:    //Красная Руда+1
+	case 0x0811:    //Желтая Руда+1
+	/* куски стружки */
+	case 0x3312:    //Кусок Черной Стружки
+	case 0x3512:    //Кусок Синей Стружки
+	case 0x3A12:    //Кусок Бархатной Стружки
+	case 0x3612:    //Кусок Зеленой Стружки
+	case 0x3C12:    //Кусок Морской Стружки
+	case 0x3B12:    //Кусок Оливковой Стружки
+	case 0x3812:    //Кусок Лиловой Стружки
+	case 0x3412:    //Кусок Красной Стружки
+	case 0x3912:    //Кусок Белой Стружки
+	case 0x3712:    //Кусок Желтой Стружкик
+	/* bad jewelry */
+#include "cdata/jewelry-bad.h"
+		return true;
 	}
-	return true;
+	return false;
 }
 
 static bool
@@ -328,7 +345,7 @@ rfx_loot::process(rf_packet_t *pkt, pqhead_t *pre, pqhead_t *post, evqhead_t *ev
 		/* generate "new loot" event */
 		evq->push_back(new rfx_loot_event(id, pkt->data[7] /* count */,
 					GET_INT16(pkt->data + 8) /*ground_id */, pkt));
-		pkt->drop = !(dumb_test(id) || lm.show.test(id));
+		pkt->drop = !(dumb_test(id) || lm.show.test(id)) || dumb_test_bad(id);
 	}
 	return RFX_DECLINE;
 }
